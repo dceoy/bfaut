@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  bfbot:
+    container_name: bfbot
+    build:
+      context: .
+    image: dceoy/bfbot:latest
+    restart: always
+    environment:
+      BFBOT_YML: /host/bfbot.yml
+    volumes:
+      - ${HOME}:/host
+    command:
+      - sfd

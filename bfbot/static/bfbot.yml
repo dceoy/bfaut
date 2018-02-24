@@ -1,0 +1,5 @@
+bF:
+  api_key: null
+  api_secret: null
+trade:
+  unit: 0.01
