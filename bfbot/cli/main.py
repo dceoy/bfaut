@@ -4,8 +4,7 @@ bF bot
 
 Usage:
     bfbot init [--debug] [--file=<yaml>]
-    bfbot sfd [--debug] [--file=<yaml>] [--wait=<sec>] [--iter=<int>]
-              [--dry-run]
+    bfbot sfd [--debug] [--file=<yaml>] [--wait=<sec>] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
 
@@ -15,7 +14,7 @@ Options:
     --debug         Execute a command with debug messages
     --file=<yaml>   Set a path to a YAML for configurations [$BFBOT_YML]
     --wait=<sec>    Wait seconds between orders [default: 0]
-    --iter=<int>    Limit a number of executions
+    --quiet         Suppress messages
 
 Commands:
     init            Generate a YAML template for configuration
@@ -24,7 +23,6 @@ Commands:
 
 import logging
 import os
-import sys
 from docopt import docopt
 from .. import __version__
 from .util import set_log_config, set_config_yml, write_config_yml, \
@@ -48,7 +46,6 @@ def main():
             logging.debug('Open SFD trading')
             sfd.open_deal(
                 config=config,
-                n=(int(args['--iter']) if args['--iter'] else sys.maxsize),
                 interval=float(args['--wait']),
-                dry_run=args['--dry-run']
+                quiet=args['--quiet']
             )
