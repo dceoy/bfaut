@@ -16,8 +16,7 @@ setup(
         'numpy',
         'pandas',
         'pyyaml',
-        'pybitflyer',
-        'scipy'
+        'pybitflyer'
     ],
     entry_points={
         'console_scripts': ['bfbot=bfbot.cli:main'],
