@@ -14,8 +14,8 @@ def open_deal(config, interval=0, quiet=False):
     )
     collateral = bF.getcollateral()
     logging.debug('collateral: {}'.format(collateral))
+    cf = config['trade']['sfd']
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-    queued_orders = set()
     if not quiet:
         print('>>> !!! OPEN SFD DEALS !!!')
 
@@ -53,19 +53,6 @@ def open_deal(config, interval=0, quiet=False):
             ))
 
         try:
-            active_orders = bF.getchildorders(
-                product_code='FX_BTC_JPY', child_order_state='ACTIVE'
-            )
-        except Exception:
-            continue
-        else:
-            queued_orders = queued_orders.intersection({
-                o['child_order_acceptance_id'] for o in active_orders
-                if 'child_order_acceptance_id' in o
-            })
-            logging.debug('queued_orders: {}'.format(queued_orders))
-
-        try:
             boards = {
                 pc: bF.board(product_code=pc)
                 for pc in ['BTC_JPY', 'FX_BTC_JPY']
@@ -98,9 +85,8 @@ def open_deal(config, interval=0, quiet=False):
                 continue
 
         if (
-                min_abs_diff < config['trade']['max_dist_open'] and
-                min_abs_diff > config['trade']['min_dist_open'] and
-                pos_size <= config['trade']['max_size'] and
+                cf['min_dist_open'] < min_abs_diff < cf['max_dist_open'] and
+                pos_size <= cf['max_size'] and
                 (pos_size == 0 or pos_side != order_side or keep_rate >= 0.8)
         ):
             try:
@@ -109,23 +95,21 @@ def open_deal(config, interval=0, quiet=False):
                     child_order_type='LIMIT',
                     side=order_side,
                     price=limit_price,
-                    size=config['trade']['unit_size'],
-                    minute_to_expire=config['trade']['minute_to_expire'],
+                    size=cf['unit_size'],
+                    minute_to_expire=cf['minute_to_expire'],
                     time_in_force='IOC'
                 )
             except Exception:
                 continue
             else:
                 logging.debug(order)
-                if 'child_order_acceptance_id' in order:
-                    queued_orders.add(order['child_order_acceptance_id'])
                 if not quiet:
                     print('>>> {0} {1} BTC-FX/JPY with LIMIT at {2}'.format(
-                        order_side, config['trade']['unit_size'], limit_price
+                        order_side, cf['unit_size'], limit_price
                     ))
         elif (
-            0 < keep_rate < config['trade']['min_keep_rate'] or
-            (pos_side and min(abs_diff) > config['trade']['min_dist_close'])
+            0 < keep_rate < cf['min_keep_rate'] or
+            (pos_side and min(abs_diff) > cf['min_dist_close'])
         ):
             rev_pos_side = {'SELL': 'BUY', 'BUY': 'SELL'}[pos_side]
             try:
@@ -134,7 +118,7 @@ def open_deal(config, interval=0, quiet=False):
                     child_order_type='MARKET',
                     side=rev_pos_side,
                     size=pos_size,
-                    minute_to_expire=config['trade']['minute_to_expire'],
+                    minute_to_expire=cf['minute_to_expire'],
                     time_in_force='GTC'
                 )
             except Exception:

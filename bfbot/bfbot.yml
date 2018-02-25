@@ -2,10 +2,11 @@ bF:
   api_key: null
   api_secret: null
 trade:
-  unit_size: 0.02
-  max_size: 1
-  min_keep_rate: 0.6
-  min_dist_open: 0.001
-  max_dist_open: 0.005
-  min_dist_close: 0.02
-  minute_to_expire: 0.1
+  sfd:
+    unit_size: 0.02
+    max_size: 1
+    min_keep_rate: 0.6
+    min_dist_open: 0.001
+    max_dist_open: 0.005
+    min_dist_close: 0.02
+    minute_to_expire: 0.1
