@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-bF bot
+bF bot trader
 
 Usage:
     bfbot init [--debug] [--file=<yaml>]
@@ -24,10 +24,9 @@ Commands:
 import logging
 import os
 from docopt import docopt
-from .. import __version__
+from . import __version__, sfd
 from .util import set_log_config, set_config_yml, write_config_yml, \
                   read_yaml
-from ..trade import sfd
 
 
 def main():

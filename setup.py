@@ -20,6 +20,6 @@ setup(
         'scipy'
     ],
     entry_points={
-        'console_scripts': ['bfbot=bfbot.cli.main:main'],
+        'console_scripts': ['bfbot=bfbot.cli:main'],
     }
 )
