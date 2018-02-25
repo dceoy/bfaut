@@ -16,4 +16,4 @@ RUN set -e \
       && pip install -U --no-cache-dir /tmp/bftrader \
       && rm -rf /tmp/*
 
-ENTRYPOINT ["bftrader"]
+ENTRYPOINT ["bfbot"]
