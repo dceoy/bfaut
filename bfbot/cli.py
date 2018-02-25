@@ -4,7 +4,7 @@ bF bot trader
 
 Usage:
     bfbot init [--debug] [--file=<yaml>]
-    bfbot sfd [--debug] [--file=<yaml>] [--wait=<sec>] [--quiet]
+    bfbot auto [--debug] [--file=<yaml>] [--wait=<sec>] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
 
@@ -18,13 +18,14 @@ Options:
 
 Commands:
     init            Generate a YAML template for configuration
-    sfd             Open SFD trading
+    auto            Open autonomous trading
 """
 
 import logging
 import os
 from docopt import docopt
-from . import __version__, sfd
+from . import __version__
+from .trader import open_deal
 from .util import set_log_config, set_config_yml, write_config_yml, \
                   read_yaml
 
@@ -41,9 +42,9 @@ def main():
     else:
         logging.debug('config_yml: {}'.format(config_yml))
         config = read_yaml(path=config_yml)
-        if args['sfd']:
-            logging.debug('Open SFD trading')
-            sfd.open_deal(
+        if args['auto']:
+            logging.debug('Open autonomous trading')
+            open_deal(
                 config=config,
                 interval=float(args['--wait']),
                 quiet=args['--quiet']
