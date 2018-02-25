@@ -8,3 +8,4 @@ trade:
   min_dist_open: 0.001
   max_dist_open: 0.005
   min_dist_close: 0.02
+  minute_to_expire: 0.1
