@@ -1,10 +1,12 @@
 #!/usr/bin/env python
 
 import logging
+import os
 import signal
 import time
 import numpy as np
 import pybitflyer
+from .util import ConsoleHelper
 
 
 def open_deal(config, interval=0, quiet=False):
@@ -15,11 +17,13 @@ def open_deal(config, interval=0, quiet=False):
     collateral = bF.getcollateral()
     logging.debug('collateral: {}'.format(collateral))
     cf = config['trade']['sfd']
+    ch = ConsoleHelper(quiet=quiet)
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     if not quiet:
-        print('>>> !!! OPEN SFD DEALS !!!')
+        ch.print_log('OPEN DEALS')
 
     while True:
+        logging.debug('(linesep){}'.format(os.linesep * 2))
         try:
             collateral = bF.getcollateral()
         except Exception:
@@ -27,7 +31,7 @@ def open_deal(config, interval=0, quiet=False):
         else:
             if 'keep_rate' in collateral:
                 keep_rate = collateral['keep_rate']
-                logging.debug('keep_rate: {}'.format(keep_rate))
+                logging.info('keep_rate: {}'.format(keep_rate))
             else:
                 continue
 
@@ -48,7 +52,7 @@ def open_deal(config, interval=0, quiet=False):
                 [k for k, v in pos_sizes.items() if v == pos_size][0]
                 if pos_size > 0 else None
             )
-            logging.debug('pos_side: {0}, pos_size: {1}'.format(
+            logging.info('pos_side: {0}, pos_size: {1}'.format(
                 pos_side, pos_size
             ))
 
@@ -61,26 +65,49 @@ def open_deal(config, interval=0, quiet=False):
             continue
         else:
             mp = {
-                pc: b['mid_price']
+                pc: int(b['mid_price'])
                 for pc, b in boards.items() if 'mid_price' in b
             }
             if all(mp.values()):
                 deviation = (mp['FX_BTC_JPY'] - mp['BTC_JPY']) / mp['BTC_JPY']
-                logging.debug(
-                    'deviation: {0} (BTC/JPY: {1}, BTC-FX/JPY: {2})'.format(
-                        deviation, mp['BTC_JPY'], mp['FX_BTC_JPY']
+                ch.print_log(
+                    'BTC/JPY: {0}, BTC-FX/JPY: {1}, Deviation: {2}'.format(
+                        mp['BTC_JPY'], mp['FX_BTC_JPY'], deviation
                     )
                 )
-                limit_price = int(mp['FX_BTC_JPY'])
                 abs_diff = abs(sfd_pin - deviation)
                 min_abs_diff = abs_diff.min()
                 nearest_pin = sfd_pin[abs_diff == min_abs_diff][0]
-                logging.debug(
+                logging.info(
                     'min_abs_diff: {0}, nearest_pin: {1}'.format(
                         min_abs_diff, nearest_pin
                     )
                 )
                 order_side = ('SELL' if nearest_pin < deviation else 'BUY')
+                rev_order_side = {'SELL': 'BUY', 'BUY': 'SELL'}[order_side]
+                target_prices = {
+                    'limit': int(
+                        mp['FX_BTC_JPY'] * (
+                            1 + cf['limit_spread'] * {
+                                'BUY': - 1, 'SELL': 1
+                            }[order_side]
+                        )
+                    ),
+                    'take_profit': int(
+                        mp['FX_BTC_JPY'] * (
+                            1 + cf['take_profit'] * {
+                                'BUY': 1, 'SELL': - 1
+                            }[order_side]
+                        )
+                    ),
+                    'stop_loss': int(
+                        mp['FX_BTC_JPY'] * (
+                            1 + cf['stop_loss'] * {
+                                'BUY': - 1, 'SELL': 1
+                            }[order_side]
+                        )
+                    )
+                }
             else:
                 continue
 
@@ -90,26 +117,48 @@ def open_deal(config, interval=0, quiet=False):
                 (pos_size == 0 or pos_side != order_side or keep_rate >= 0.8)
         ):
             try:
-                order = bF.sendchildorder(
-                    product_code='FX_BTC_JPY',
-                    child_order_type='LIMIT',
-                    side=order_side,
-                    price=limit_price,
-                    size=cf['unit_size'],
-                    minute_to_expire=cf['minute_to_expire'],
-                    time_in_force='IOC'
+                order = bF.sendparentorder(
+                    order_method='IFDOCO',
+                    time_in_force='GTC',
+                    parameters=[
+                        {
+                            'product_code': 'FX_BTC_JPY',
+                            'condition_type': 'LIMIT',
+                            'side': order_side,
+                            'price': target_prices['limit'],
+                            'size': cf['unit_size']
+                        },
+                        {
+                            'product_code': 'FX_BTC_JPY',
+                            'condition_type': 'LIMIT',
+                            'side': rev_order_side,
+                            'price': target_prices['take_profit'],
+                            'size': cf['unit_size']
+                        },
+                        {
+                            'product_code': 'FX_BTC_JPY',
+                            'condition_type': 'STOP',
+                            'side': rev_order_side,
+                            'trigger_price': target_prices['stop_loss'],
+                            'size': cf['unit_size']
+                        }
+                    ]
                 )
             except Exception:
                 continue
             else:
                 logging.debug(order)
                 if not quiet:
-                    print('>>> {0} {1} BTC-FX/JPY with LIMIT at {2}'.format(
-                        order_side, cf['unit_size'], limit_price
-                    ))
+                    ch.print_log(
+                        '{0} {1} BTC-FX/JPY with IFDOCO at {2}'.format(
+                            order_side, cf['unit_size'], target_prices['limit']
+                        )
+                    )
         elif (
-            0 < keep_rate < cf['min_keep_rate'] or
-            (pos_side and min(abs_diff) > cf['min_dist_close'])
+            pos_side and (
+                0 < keep_rate < cf['min_keep_rate'] or
+                min(abs_diff) > cf['min_dist_close']
+            )
         ):
             rev_pos_side = {'SELL': 'BUY', 'BUY': 'SELL'}[pos_side]
             try:
@@ -118,7 +167,6 @@ def open_deal(config, interval=0, quiet=False):
                     child_order_type='MARKET',
                     side=rev_pos_side,
                     size=pos_size,
-                    minute_to_expire=cf['minute_to_expire'],
                     time_in_force='GTC'
                 )
             except Exception:
@@ -126,9 +174,9 @@ def open_deal(config, interval=0, quiet=False):
             else:
                 logging.debug(order)
                 if not quiet:
-                    print('>>> {0} {1} BTC-FX/JPY with MARKET'.format(
+                    ch.print_log('{0} {1} BTC-FX/JPY with MARKET'.format(
                         rev_pos_side, pos_size
                     ))
         else:
-            logging.debug('Skip by the criteria')
+            logging.info('Skipped by the criteria.')
             time.sleep(interval)

@@ -43,3 +43,15 @@ def write_config_yml(path):
             os.path.join(os.path.dirname(__file__), 'bfbot.yml'), path
         )
         print('A YAML template was generated: {}'.format(path))
+
+
+class ConsoleHelper(object):
+    def __init__(self, quiet):
+        self.quiet = quiet
+
+    def print_log(self, message):
+        text = '>>>\t{}'.format(message)
+        if self.quiet:
+            logging.debug(text)
+        else:
+            print(text, flush=True)
