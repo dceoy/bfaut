@@ -108,8 +108,8 @@ def open_deal(config, interval=0, quiet=False):
                                             d['price'] < mp['FX_BTC_JPY']
                                         ]
                                     ).assign(
-                                        wt=lambda d: d['size'] / np.power(
-                                            d['price'] - mp['FX_BTC_JPY'], 2
+                                        wt=lambda d: d['size'] / np.abs(
+                                            d['price'] - mp['FX_BTC_JPY']
                                         )
                                     )['wt']
                                 )
@@ -154,43 +154,67 @@ def open_deal(config, interval=0, quiet=False):
                 )
         ):
             try:
-                order = bF.sendparentorder(
-                    order_method='IFDOCO',
-                    time_in_force='GTC',
-                    minute_to_expire=cf[model]['minute_to_expire'],
-                    parameters=[
-                        {
-                            'product_code': 'FX_BTC_JPY',
-                            'condition_type': 'LIMIT',
-                            'side': order_sides['open'],
-                            'price': order_prices['limit'],
-                            'size': cf['size']['unit']
-                        },
-                        {
-                            'product_code': 'FX_BTC_JPY',
-                            'condition_type': 'LIMIT',
-                            'side': order_sides['close'],
-                            'price': order_prices['take_profit'],
-                            'size': cf['size']['unit']
-                        },
-                        {
-                            'product_code': 'FX_BTC_JPY',
-                            'condition_type': 'STOP',
-                            'side': order_sides['close'],
-                            'trigger_price': order_prices['stop_loss'],
-                            'size': cf['size']['unit']
-                        }
-                    ]
+                order = (
+                    bF.sendchildorder(
+                        product_code='FX_BTC_JPY',
+                        child_order_type='MARKET',
+                        side=order_sides['open'],
+                        size=cf['size']['unit'],
+                        minute_to_expire=cf[model]['minute_to_expire'],
+                        time_in_force='IOC'
+                    )
+                    if pos_side and pos_side != order_sides['open'] else
+                    bF.sendparentorder(
+                        order_method='IFDOCO',
+                        time_in_force='GTC',
+                        minute_to_expire=cf[model]['minute_to_expire'],
+                        parameters=[
+                            {
+                                'product_code': 'FX_BTC_JPY',
+                                'condition_type': 'LIMIT',
+                                'side': order_sides['open'],
+                                'price': order_prices['limit'],
+                                'size': cf['size']['unit']
+                            },
+                            {
+                                'product_code': 'FX_BTC_JPY',
+                                'condition_type': 'LIMIT',
+                                'side': order_sides['close'],
+                                'price': order_prices['take_profit'],
+                                'size': cf['size']['unit']
+                            },
+                            {
+                                'product_code': 'FX_BTC_JPY',
+                                'condition_type': 'STOP',
+                                'side': order_sides['close'],
+                                'trigger_price': order_prices['stop_loss'],
+                                'size': cf['size']['unit']
+                            }
+                        ]
+                    )
                 )
             except Exception:
                 continue
             else:
                 logging.debug(order)
-                if not quiet:
+                if (
+                        not quiet and
+                        ('status' not in order or order['status'] != - 205)
+                ):
                     ch.print_log(
-                        '{0} {1} BTC-FX/JPY with IFDOCO at {2}'.format(
+                        '{0} {1} BTC-FX/JPY with {2}'.format(
                             order_sides['open'], cf['size']['unit'],
-                            order_prices['limit']
+                            (
+                                'MARKET'
+                                if pos_side and pos_side != order_sides['open']
+                                else 'IFDOCO (IFD: {0} => OCO: {1})'.format(
+                                    order_prices['limit'],
+                                    sorted([
+                                        order_prices['stop_loss'],
+                                        order_prices['take_profit']
+                                    ])
+                                )
+                            )
                         )
                     )
         else:
