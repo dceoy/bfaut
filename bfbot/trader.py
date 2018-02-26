@@ -5,7 +5,6 @@ import os
 import signal
 import time
 import numpy as np
-import pandas as pd
 import pybitflyer
 from .util import ConsoleHelper
 
@@ -86,56 +85,29 @@ def open_deal(config, interval=0, quiet=False):
                         min_abs_diff, nearest_pin
                     )
                 )
-                model = (
-                    'sfd' if min_abs_diff < cf['sfd']['max_dist_open']
-                    else 'scalper'
-                )
                 order_sides = (
-                    (
-                        {'open': 'SELL', 'close': 'BUY'}
-                        if nearest_pin < deviation else
-                        {'open': 'BUY', 'close': 'SELL'}
-                    ) if model == 'sfd' else (
-                        {'open': 'SELL', 'close': 'BUY'}
-                        if np.diff(np.log(np.array([
-                                np.sum(
-                                    pd.DataFrame.from_dict(
-                                        boards['FX_BTC_JPY'][s]
-                                    ).pipe(
-                                        lambda d: d[
-                                            d['price'] > mp['FX_BTC_JPY']
-                                            if s == 'asks' else
-                                            d['price'] < mp['FX_BTC_JPY']
-                                        ]
-                                    ).assign(
-                                        wt=lambda d: d['size'] / np.abs(
-                                            d['price'] - mp['FX_BTC_JPY']
-                                        )
-                                    )['wt']
-                                )
-                                for s in ['bids', 'asks']
-                        ])))[0] > 0 else
-                        {'open': 'BUY', 'close': 'SELL'}
-                    )
+                    {'open': 'SELL', 'close': 'BUY'}
+                    if nearest_pin < deviation else
+                    {'open': 'BUY', 'close': 'SELL'}
                 )
                 order_prices = {
                     'limit': int(
                         mp['FX_BTC_JPY'] * (
-                            1 + cf[model]['limit_spread'] * {
+                            1 + cf['sfd']['limit_spread'] * {
                                 'BUY': - 1, 'SELL': 1
                             }[order_sides['open']]
                         )
                     ),
                     'take_profit': int(
                         mp['FX_BTC_JPY'] * (
-                            1 + cf[model]['take_profit'] * {
+                            1 + cf['sfd']['take_profit'] * {
                                 'BUY': 1, 'SELL': - 1
                             }[order_sides['open']]
                         )
                     ),
                     'stop_loss': int(
                         mp['FX_BTC_JPY'] * (
-                            1 + cf[model]['stop_loss'] * {
+                            1 + cf['sfd']['stop_loss'] * {
                                 'BUY': - 1, 'SELL': 1
                             }[order_sides['open']]
                         )
@@ -145,7 +117,8 @@ def open_deal(config, interval=0, quiet=False):
                 continue
 
         if (
-                min_abs_diff > cf['sfd']['min_dist_open'] and
+                min_abs_diff <= cf['sfd']['max_dist_open'] and
+                min_abs_diff >= cf['sfd']['min_dist_open'] and
                 pos_size <= cf['size']['max'] and
                 (
                     pos_size == 0 or
@@ -160,14 +133,14 @@ def open_deal(config, interval=0, quiet=False):
                         child_order_type='MARKET',
                         side=order_sides['open'],
                         size=cf['size']['unit'],
-                        minute_to_expire=cf[model]['minute_to_expire'],
+                        minute_to_expire=cf['sfd']['minute_to_expire'],
                         time_in_force='IOC'
                     )
                     if pos_side and pos_side != order_sides['open'] else
                     bF.sendparentorder(
                         order_method='IFDOCO',
                         time_in_force='GTC',
-                        minute_to_expire=cf[model]['minute_to_expire'],
+                        minute_to_expire=cf['sfd']['minute_to_expire'],
                         parameters=[
                             {
                                 'product_code': 'FX_BTC_JPY',

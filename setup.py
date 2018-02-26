@@ -15,8 +15,10 @@ setup(
         'docopt',
         'numpy',
         'pandas',
+        'pubnub',
         'pyyaml',
-        'pybitflyer'
+        'pybitflyer',
+        'tornado'
     ],
     entry_points={
         'console_scripts': ['bfbot=bfbot.cli:main'],
