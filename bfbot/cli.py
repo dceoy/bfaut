@@ -4,6 +4,7 @@ bF bot trader
 
 Usage:
     bfbot init [--debug] [--file=<yaml>]
+    bfbot stream [--debug] [<product>...]
     bfbot auto [--debug] [--file=<yaml>] [--wait=<sec>] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
@@ -18,13 +19,18 @@ Options:
 
 Commands:
     init            Generate a YAML template for configuration
+    stream          Stream rate
     auto            Open autonomous trading
+
+Arguments:
+    <product>       Product codes [default: FX_BTC_JPY]
 """
 
 import logging
 import os
 from docopt import docopt
 from . import __version__
+from .streamer import stream_rate
 from .trader import open_deal
 from .util import set_log_config, set_config_yml, write_config_yml, \
                   read_yaml
@@ -37,8 +43,11 @@ def main():
     config_yml = set_config_yml(path=args['--file'])
 
     if args['init']:
-        logging.debug('Initiation')
+        logging.debug('Generate a config file')
         write_config_yml(path=config_yml)
+    elif args['stream']:
+        logging.debug('Stream rate')
+        stream_rate(products=(args['<product>'] or ['FX_BTC_JPY']))
     else:
         logging.debug('config_yml: {}'.format(config_yml))
         config = read_yaml(path=config_yml)

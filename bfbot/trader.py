@@ -88,7 +88,7 @@ def open_deal(config, interval=0, quiet=False):
                 )
                 model = (
                     'sfd' if min_abs_diff < cf['sfd']['max_dist_open']
-                    else 'flash'
+                    else 'scalper'
                 )
                 order_sides = (
                     (
