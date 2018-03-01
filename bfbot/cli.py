@@ -4,7 +4,7 @@ bF bot trader
 
 Usage:
     bfbot init [--debug] [--file=<yaml>]
-    bfbot stream [--debug] [<product>...]
+    bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<product>...]
     bfbot auto [--debug] [--file=<yaml>] [--wait=<sec>] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
@@ -14,6 +14,7 @@ Options:
     -v, --version   Print version and exit
     --debug         Execute a command with debug messages
     --file=<yaml>   Set a path to a YAML for configurations [$BFBOT_YML]
+    --sqlite=<path> Save data in an SQLite3 database
     --wait=<sec>    Wait seconds between orders [default: 0]
     --quiet         Suppress messages
 
@@ -47,7 +48,11 @@ def main():
         write_config_yml(path=config_yml)
     elif args['stream']:
         logging.debug('Stream rate')
-        stream_rate(products=(args['<product>'] or ['FX_BTC_JPY']))
+        stream_rate(
+            products=(args['<product>'] or ['FX_BTC_JPY']),
+            sqlite_path=args['--sqlite'],
+            quiet=args['--quiet']
+        )
     else:
         logging.debug('config_yml: {}'.format(config_yml))
         config = read_yaml(path=config_yml)
