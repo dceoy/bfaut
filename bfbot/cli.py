@@ -3,28 +3,28 @@
 bF bot trader
 
 Usage:
-    bfbot init [--debug] [--file=<yaml>]
     bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<product>...]
-    bfbot auto [--debug] [--file=<yaml>] [--wait=<sec>] [--quiet]
+    bfbot init [--debug] [--file=<yaml>]
+    bfbot auto [--debug] [--pair=<code>] [--file=<yaml>] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
 
 Options:
-    -h, --help      Print help and exit
-    -v, --version   Print version and exit
-    --debug         Execute a command with debug messages
-    --file=<yaml>   Set a path to a YAML for configurations [$BFBOT_YML]
-    --sqlite=<path> Save data in an SQLite3 database
-    --wait=<sec>    Wait seconds between orders [default: 0]
-    --quiet         Suppress messages
+    -h, --help          Print help and exit
+    -v, --version       Print version and exit
+    --debug             Execute a command with debug messages
+    --sqlite=<path>     Save data in an SQLite3 database
+    --pair=<code>       Set an actual currency pair [default: BTC_JPY]
+    --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
+    --quiet             Suppress messages
 
 Commands:
-    init            Generate a YAML template for configuration
-    stream          Stream rate
-    auto            Open autonomous trading
+    init                Generate a YAML template for configuration
+    stream              Stream rate
+    auto                Open autonomous trading
 
 Arguments:
-    <product>       Product codes [default: FX_BTC_JPY]
+    <product>           Product codes [default: FX_BTC_JPY]
 """
 
 import logging
@@ -60,6 +60,6 @@ def main():
             logging.debug('Open autonomous trading')
             open_deal(
                 config=config,
-                interval=float(args['--wait']),
+                pair=args['--pair'],
                 quiet=args['--quiet']
             )
