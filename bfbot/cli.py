@@ -3,7 +3,8 @@
 bF bot trader
 
 Usage:
-    bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<product>...]
+    bfbot stream [--debug] [--ch=<type>] [--sqlite=<path>] [--quiet]
+                 [<product>...]
     bfbot init [--debug] [--file=<yaml>]
     bfbot auto [--debug] [--pair=<code>] [--file=<yaml>] [--quiet]
     bfbot -h|--help
@@ -13,6 +14,7 @@ Options:
     -h, --help          Print help and exit
     -v, --version       Print version and exit
     --debug             Execute a command with debug messages
+    --ch=<type>         Set a lightning channel type [default: ticker]
     --sqlite=<path>     Save data in an SQLite3 database
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
     --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
@@ -50,6 +52,7 @@ def main():
         logging.debug('Stream rate')
         stream_rate(
             products=(args['<product>'] or ['FX_BTC_JPY']),
+            ch_type=args['--ch'],
             sqlite_path=args['--sqlite'],
             quiet=args['--quiet']
         )

@@ -205,7 +205,11 @@ class BfStreamTrader(SubscribeCallback):
 
 
 def open_deal(config, pair='BTC_JPY', quiet=False):
-    bas = BfAsyncSubscriber(products=[p + pair for p in ['FX_', '']])
+    bas = BfAsyncSubscriber(
+        channels=[
+            'lightning_ticker_{1}{2}'.format(p, pair) for p in ['FX_', '']
+        ]
+    )
     bas.pubnub.add_listener(
         BfStreamTrader(pair=pair, config=config, quiet=quiet)
     )

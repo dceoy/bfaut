@@ -10,8 +10,8 @@ from tornado import gen
 
 
 class BfAsyncSubscriber:
-    def __init__(self, products):
-        self.channels = ['lightning_ticker_' + p for p in products]
+    def __init__(self, channels):
+        self.channels = channels
         pnc = PNConfiguration()
         pnc.subscribe_key = 'sub-c-52a9ab50-291b-11e5-baaa-0619f8945a4f'
         pnc.reconnect_policy = PNReconnectionPolicy.LINEAR
@@ -42,8 +42,11 @@ class BfSubscribeCallback(SubscribeCallback):
             print(message.message)
 
 
-def stream_rate(products=['FX_BTC_JPY'], sqlite_path=None, quiet=False):
-    bas = BfAsyncSubscriber(products=products)
+def stream_rate(products=['FX_BTC_JPY'], ch_type='ticker', sqlite_path=None,
+                quiet=False):
+    bas = BfAsyncSubscriber(
+        channels=['lightning_{0}_{1}'.format(ch_type, p) for p in products]
+    )
     bas.pubnub.add_listener(
         BfSubscribeCallback(sqlite_path=sqlite_path, quiet=quiet)
     )
