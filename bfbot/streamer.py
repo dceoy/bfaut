@@ -29,15 +29,26 @@ class BfSubscribeCallback(SubscribeCallback):
 
     def message(self, pubnub, message):
         if self.db:
-            pd.DataFrame(
-                [message.message]
-            ).assign(
-                timestamp=lambda d: pd.to_datetime(d['timestamp'])
-            ).set_index(
-                'timestamp'
-            ).to_sql(
-                name=message.channel, con=self.db, if_exists='append'
-            )
+            if message.channel.startswith('lightning_ticker_'):
+                pd.DataFrame(
+                    [message.message]
+                ).assign(
+                    timestamp=lambda d: pd.to_datetime(d['timestamp'])
+                ).set_index(
+                    'timestamp'
+                ).to_sql(
+                    name=message.channel, con=self.db, if_exists='append'
+                )
+            elif message.channel.startswith('lightning_executions_'):
+                pd.DataFrame(
+                    message.message
+                ).assign(
+                    exec_date=lambda d: pd.to_datetime(d['exec_date'])
+                ).set_index(
+                    'exec_date'
+                ).to_sql(
+                    name=message.channel, con=self.db, if_exists='append'
+                )
         if not self.quiet:
             print({message.channel: message.message})
 
