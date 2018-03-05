@@ -36,17 +36,14 @@ class BfSubscribeCallback(SubscribeCallback):
             ).set_index(
                 'timestamp'
             ).to_sql(
-                name='ticker', con=self.db, if_exists='append'
+                name=message.channel, con=self.db, if_exists='append'
             )
         if not self.quiet:
-            print(message.message)
+            print({message.channel: message.message})
 
 
-def stream_rate(products=['FX_BTC_JPY'], ch_type='ticker', sqlite_path=None,
-                quiet=False):
-    bas = BfAsyncSubscriber(
-        channels=['lightning_{0}_{1}'.format(ch_type, p) for p in products]
-    )
+def stream_rate(channels, sqlite_path=None, quiet=False):
+    bas = BfAsyncSubscriber(channels=channels)
     bas.pubnub.add_listener(
         BfSubscribeCallback(sqlite_path=sqlite_path, quiet=quiet)
     )

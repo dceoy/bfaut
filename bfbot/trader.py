@@ -21,15 +21,18 @@ class BfStreamTrader(SubscribeCallback):
             api_key=config['bF']['api_key'],
             api_secret=config['bF']['api_secret']
         )
-        self.df = pd.DataFrame()
+        self.dfs = {}
         self.tick = {}
         self.logger = logging.getLogger(__name__)
 
     def message(self, pubnub, message):
         if not self.tick:
             self._print('OPEN DEAL')
-        self.df = (
-            self.df if len(self.df) < self.ql else self.df.iloc[1:]
+        self.dfs[message.channel] = (
+            self.dfs[message.channel].pipe(
+                lambda d: (d if len(d) < self.ql else d.iloc[1:])
+            )
+            if message.channel in self.dfs else pd.DataFrame()
         ).append(
             pd.DataFrame(
                 [message.message]
@@ -37,7 +40,8 @@ class BfStreamTrader(SubscribeCallback):
                 timestamp=lambda d: pd.to_datetime(d['timestamp'])
             ).set_index('timestamp')
         )
-        self.tick[message.message['product_code']] = message.message
+        if message.channel.startswith('lightning_ticker_'):
+            self.tick[message.message['product_code']] = message.message
         if self.pair in self.tick and self.fx_pair in self.tick:
             self._trade()
 
@@ -207,7 +211,7 @@ class BfStreamTrader(SubscribeCallback):
 def open_deal(config, pair='BTC_JPY', quiet=False):
     bas = BfAsyncSubscriber(
         channels=[
-            'lightning_ticker_{1}{2}'.format(p, pair) for p in ['FX_', '']
+            'lightning_ticker_' + p + pair for p in ['FX_', '']
         ]
     )
     bas.pubnub.add_listener(
