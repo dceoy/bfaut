@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 import signal
 import numpy as np
@@ -15,48 +15,49 @@ class BfStreamTrader(SubscribeCallback):
         self.pair = pair
         self.fx_pair = 'FX_{}'.format(pair)
         self.trade = config['trade']
-        self.start_datetime = None
         self.quiet = quiet
         self.sfd_pins = np.array([0.1, 0.15, 0.2])
         self.bF = pybitflyer.API(
             api_key=config['bF']['api_key'],
             api_secret=config['bF']['api_secret']
         )
-        self.df = pd.DataFrame()
+        self.start_datetime = None
+        self.weighted_volumes = None
         self.logger = logging.getLogger(__name__)
 
     def message(self, pubnub, message):
-        new_df = pd.DataFrame(
+        new_volumes = pd.DataFrame(
             message.message
-        ).assign(
-            exec_date=lambda d: pd.to_datetime(d['exec_date'])
-        ).set_index('exec_date')[['side', 'size', 'price']]
-        if not self.start_datetime:
-            self.start_datetime = new_df.index.min()
-            self._print('Collecting execution data...')
-        window_start_datetime = new_df.index.max() - timedelta(
-            seconds=self.trade['window']['size_seconds']
-        )
-        self.df = self.df.append(new_df).pipe(
-            lambda d: d[d.index >= window_start_datetime]
-        )
-        logging.debug(self.df)
-        if len(self.df) and self.start_datetime < window_start_datetime:
-            volumes = self.df.append(
-                pd.DataFrame(data={'side': ['BUY', 'SELL'], 'size': [0, 0]})
-            ).groupby('side')['size'].sum()
-            if (
-                    abs(np.diff(volumes)[0]) <
-                    self.trade['window']['min_volume_diff']
-            ):
-                self._print(
-                    'Skipped for a volume balance.\t'
-                    '[ BUY: {0:.2f}, SELL: {1:.2f} ]'.format(
-                        volumes['BUY'], volumes['SELL']
+        )[['side', 'size']].append(
+            pd.DataFrame({'side': ['BUY', 'SELL'], 'size': [0, 0]})
+        ).groupby('side')['size'].sum()
+        if self.start_datetime:
+            self.weighted_volumes = (
+                new_volumes +
+                self.weighted_volumes * self.trade['volume']['exp_decay']
+            ) / (1 + self.trade['volume']['exp_decay'])
+            time_left = timedelta(
+                seconds=self.trade['loading_seconds']
+            ) - (datetime.now() - self.start_datetime)
+            if time_left < timedelta(seconds=0):
+                volume_diff = abs(np.diff(self.weighted_volumes)[0])
+                self.logger.info('volume_diff: {}'.format(volume_diff))
+                if volume_diff > self.trade['volume']['min_diff']:
+                    self._trade()
+                else:
+                    self._print(
+                        'Skipped for a volume balance.\t'
+                        '[ BUY: {0:.2f}, SELL: {1:.2f} ]'.format(
+                            self.weighted_volumes['BUY'],
+                            self.weighted_volumes['SELL']
+                        )
                     )
-                )
             else:
-                self._trade(volumes=volumes)
+                self.logger.info('time_left: {}'.format(time_left))
+        else:
+            self.start_datetime = datetime.now()
+            self.weighted_volumes = new_volumes
+            self._print('Collecting execution data...')
 
     def _print(self, message):
         text = '>>>\t{}'.format(message)
@@ -110,14 +111,14 @@ class BfStreamTrader(SubscribeCallback):
         ))
         return penalized_side, sfd_near_dist
 
-    def _trade(self, volumes):
+    def _trade(self):
         try:
             keep_rate, pos_side, pos_size, tickers = self._fetch_state()
         except Exception as e:
             self.logger.error(e)
             return
         else:
-            open_side = volumes.idxmax()
+            open_side = self.weighted_volumes.idxmax()
             close_side = {'BUY': 'SELL', 'SELL': 'BUY'}[open_side]
             open_price = tickers[self.fx_pair][
                 {'BUY': 'best_ask', 'SELL': 'best_bid'}[open_side]
@@ -150,9 +151,8 @@ class BfStreamTrader(SubscribeCallback):
             )
 
         if (
-                open_side != penalized_side and
                 sfd_near_dist > self.trade['skip_sfd_dist'] and (
-                    pos_side != open_side or (
+                    (pos_side and pos_side != open_side) or (
                         pos_size <= self.trade['size']['max'] and
                         keep_rate >= self.trade['min_keep_rate']
                     )
@@ -165,14 +165,12 @@ class BfStreamTrader(SubscribeCallback):
                         child_order_type='MARKET',
                         side=open_side,
                         size=self.trade['size']['unit'],
-                        minute_to_expire=self.trade['order_exp_minutes'],
                         time_in_force='IOC'
                     )
                     if pos_side and pos_side != open_side else
                     self.bF.sendparentorder(
                         order_method='IFDOCO',
                         time_in_force='GTC',
-                        minute_to_expire=self.trade['order_exp_minutes'],
                         parameters=[
                             {
                                 'product_code': self.fx_pair,
@@ -200,10 +198,10 @@ class BfStreamTrader(SubscribeCallback):
                 )
             except Exception as e:
                 self.logger.error(e)
-                return e
+                return
             else:
                 self.logger.debug(order)
-                if 'status' not in order or order['status'] != - 205:
+                if order.get('status') != - 205:
                     self._print(
                         (
                             '{0} {1} {2} with {3}.\t'
@@ -221,14 +219,16 @@ class BfStreamTrader(SubscribeCallback):
                                     ])
                                 )
                             ),
-                            volumes['BUY'], volumes['SELL']
+                            self.weighted_volumes['BUY'],
+                            self.weighted_volumes['SELL']
                         )
                     )
         else:
             self._print(
                 'Skipped by the criteria.\t'
                 '[ BUY: {0:.2f}, SELL: {1:.2f} ]'.format(
-                    volumes['BUY'], volumes['SELL']
+                    self.weighted_volumes['BUY'],
+                    self.weighted_volumes['SELL']
                 )
             )
 
