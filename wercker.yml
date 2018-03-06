@@ -1,0 +1,27 @@
+box:
+  id: dceoy/wercker-base:python
+  entrypoint: /bin/bash -c
+test:
+  steps:
+    - script:
+        name: Install bfbot
+        code: |
+          pip install -U .
+    - script:
+        name: Validate the codes using flake8
+        code: |
+          pip install -U flake8
+          find . -name '*.py' | xargs flake8
+    - script:
+        name: Test base options
+        code: |
+          bfbot --version
+          bfbot --help
+    - script:
+        name: Test commands
+        code: |
+          bfbot init --debug
+  after-steps:
+    - slack-notifier:
+        url: $SLACK_URL
+        channel: $SLACK_CHANNEL
