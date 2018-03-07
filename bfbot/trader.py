@@ -100,16 +100,22 @@ class BfStreamTrader(SubscribeCallback):
         self.logger.debug(tickers)
         return keep_rate, pos_side, pos_size, tickers
 
-    def _calc_sfd_dist(self, tickers):
+    def _calc_sfd_stat(self, tickers):
         mp = {
             k: (v['best_bid'] + v['best_ask']) / 2
             for k, v in tickers.items() if k in [self.fx_pair, self.pair]
         }
         deviation = (mp[self.fx_pair] - mp[self.pair]) / mp[self.pair]
         self.logger.info('rate: {0}, deviation: {1}'.format(mp, deviation))
+        penal_side = (
+            ('BUY' if mp[self.fx_pair] >= mp[self.pair] else 'SELL')
+            if abs(deviation) >= self.sfd_pins.min() else None
+        )
         sfd_near_dist = np.abs(self.sfd_pins - abs(deviation)).min()
-        self.logger.info('sfd_near_dist: {}'.format(sfd_near_dist))
-        return sfd_near_dist
+        self.logger.info('penal_side: {0}, sfd_near_dist: {1}'.format(
+            penal_side, sfd_near_dist
+        ))
+        return penal_side, sfd_near_dist
 
     def _determine_order_sides(self):
         open_side = self.weighted_volumes.idxmax()
@@ -163,15 +169,20 @@ class BfStreamTrader(SubscribeCallback):
                     tickers=tickers, order_sides=order_sides
                 ) if self.ifdoco else None
             )
-            sfd_near_dist = self._calc_sfd_dist(tickers=tickers)
+            penal_side, sfd_near_dist = self._calc_sfd_stat(tickers=tickers)
 
         if sfd_near_dist < self.trade['skip_sfd_dist']:
             self._print(
                 'Skip by sfd boundary. '
                 '(distance to a sfd pin: {:.6f})'.format(sfd_near_dist)
             )
+        elif order_sides['open'] == penal_side:
+            self._print(
+                'Skip by sfd penalty. '
+                '(penalized side: {})'.format(penal_side)
+            )
         elif (
-            pos_side == order_sides['open'] and
+            order_sides['open'] == pos_side and
             keep_rate < self.trade['min_keep_rate']
         ):
             self._print(
@@ -179,7 +190,7 @@ class BfStreamTrader(SubscribeCallback):
                 '(current retention rate: {:.6f})'.format(keep_rate)
             )
         elif (
-            pos_side == order_sides['open'] and
+            order_sides['open'] == pos_side and
             pos_size >= self.trade['size']['max']
         ):
             self._print(
