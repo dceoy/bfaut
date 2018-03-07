@@ -6,7 +6,7 @@ Usage:
     bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
     bfbot init [--debug] [--file=<yaml>]
     bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--wait=<sec>]
-               [--quiet]
+               [--ifdoco] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
 
@@ -18,6 +18,7 @@ Options:
     --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
     --wait=<sec>        Wait for loading [default: 10]
+    --ifdoco            Use IFDOCO order for opening
     --quiet             Suppress messages
 
 Commands:
@@ -63,6 +64,7 @@ def main():
                 config=config,
                 pair=args['--pair'],
                 wait=args['--wait'],
+                ifdoco=args['--ifdoco'],
                 quiet=args['--quiet']
             )
 
