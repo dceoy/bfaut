@@ -17,7 +17,7 @@ Options:
     --sqlite=<path>     Save data in an SQLite3 database
     --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
-    --wait=<sec>        Wait for loading [default: 20]
+    --wait=<sec>        Wait for loading [default: 10]
     --quiet             Suppress messages
 
 Commands:
