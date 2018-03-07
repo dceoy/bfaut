@@ -2,7 +2,6 @@ bF:
   api_key: null
   api_secret: null
 trade:
-  loading_seconds: 60
   min_keep_rate: 0.8
   order:
     limit_spread: 0.00001
@@ -13,5 +12,5 @@ trade:
     max: 100
   skip_sfd_dist: 0.001
   volume:
-    exp_decay: 0.99
+    ewma_alpha: 0.01
     min_diff: 1

@@ -11,10 +11,11 @@ from .streamer import BfAsyncSubscriber
 
 
 class BfStreamTrader(SubscribeCallback):
-    def __init__(self, pair, config, quiet=False):
+    def __init__(self, pair, config, wait=0, quiet=False):
         self.pair = pair
         self.fx_pair = 'FX_{}'.format(pair)
         self.trade = config['trade']
+        self.wait = float(wait)
         self.quiet = quiet
         self.sfd_pins = np.array([0.1, 0.15, 0.2])
         self.bF = pybitflyer.API(
@@ -33,12 +34,14 @@ class BfStreamTrader(SubscribeCallback):
         ).groupby('side')['size'].sum()
         if self.start_datetime:
             self.weighted_volumes = (
-                new_volumes +
-                self.weighted_volumes * self.trade['volume']['exp_decay']
-            ) / (1 + self.trade['volume']['exp_decay'])
-            time_left = timedelta(
-                seconds=self.trade['loading_seconds']
-            ) - (datetime.now() - self.start_datetime)
+                self.trade['volume']['ewma_alpha'] * new_volumes +
+                (1 - self.trade['volume']['ewma_alpha']) *
+                self.weighted_volumes
+            )
+            time_left = (
+                self.start_datetime + timedelta(seconds=self.wait) -
+                datetime.now()
+            )
             if time_left < timedelta(seconds=0):
                 volume_diff = abs(np.diff(self.weighted_volumes)[0])
                 self.logger.info('volume_diff: {}'.format(volume_diff))
@@ -57,18 +60,18 @@ class BfStreamTrader(SubscribeCallback):
         else:
             self.start_datetime = datetime.now()
             self.weighted_volumes = new_volumes
-            self._print('Collecting execution data...')
+            self._print('Waiting for loading...')
 
     def _print(self, message):
         text = '>>>\t{}'.format(message)
         if self.quiet:
-            self.logger.debug(text)
+            self.logger.info(text)
         else:
             print(text, flush=True)
 
     def _fetch_state(self):
         collateral = self.bF.getcollateral()
-        self.logger.debug('collateral: {}'.format(collateral))
+        self.logger.debug(collateral)
         keep_rate = collateral.get('keep_rate')
         self.logger.info('keep_rate: {}'.format(keep_rate))
 
@@ -91,25 +94,55 @@ class BfStreamTrader(SubscribeCallback):
             p: self.bF.ticker(product_code=p)
             for p in [self.pair, self.fx_pair]
         }
-        self.logger.info('tickers: {}'.format(tickers))
+        self.logger.debug(tickers)
         return keep_rate, pos_side, pos_size, tickers
 
-    def _calc_deviation(self, tickers):
+    def _calc_sfd_dist(self, tickers):
         mp = {
             k: (v['best_bid'] + v['best_ask']) / 2
             for k, v in tickers.items() if k in [self.fx_pair, self.pair]
         }
         deviation = (mp[self.fx_pair] - mp[self.pair]) / mp[self.pair]
         self.logger.info('rate: {0}, deviation: {1}'.format(mp, deviation))
-        penalized_side = (
-            ('BUY' if mp[self.fx_pair] >= mp[self.pair] else 'SELL')
-            if abs(deviation) >= self.sfd_pins.min() else None
-        )
         sfd_near_dist = np.abs(self.sfd_pins - abs(deviation)).min()
-        self.logger.info('penalized_side: {0}, sfd_near_dist: {1}'.format(
-            penalized_side, sfd_near_dist
-        ))
-        return penalized_side, sfd_near_dist
+        self.logger.info('sfd_near_dist: {}'.format(sfd_near_dist))
+        return sfd_near_dist
+
+    def _design_order(self, tickers):
+        open_side = self.weighted_volumes.idxmax()
+        order_sides = {
+            'open': open_side,
+            'close': {'BUY': 'SELL', 'SELL': 'BUY'}[open_side]
+        }
+        self.logger.info('order_sides: {}'.format(order_sides))
+        open_price = tickers[self.fx_pair][
+            {'BUY': 'best_ask', 'SELL': 'best_bid'}[open_side]
+        ]
+        order_prices = {
+            'limit': int(
+                open_price * (
+                    1 + self.trade['order']['limit_spread'] * {
+                        'BUY': - 1, 'SELL': 1
+                    }[open_side]
+                )
+            ),
+            'take_profit': int(
+                open_price * (
+                    1 + self.trade['order']['take_profit'] * {
+                        'BUY': 1, 'SELL': - 1
+                    }[open_side]
+                )
+            ),
+            'stop_loss': int(
+                open_price * (
+                    1 + self.trade['order']['stop_loss'] * {
+                        'BUY': - 1, 'SELL': 1
+                    }[open_side]
+                )
+            )
+        }
+        self.logger.info('order_prices: {}'.format(order_prices))
+        return order_sides, order_prices
 
     def _trade(self):
         try:
@@ -118,41 +151,12 @@ class BfStreamTrader(SubscribeCallback):
             self.logger.error(e)
             return
         else:
-            open_side = self.weighted_volumes.idxmax()
-            close_side = {'BUY': 'SELL', 'SELL': 'BUY'}[open_side]
-            open_price = tickers[self.fx_pair][
-                {'BUY': 'best_ask', 'SELL': 'best_bid'}[open_side]
-            ]
-            order_prices = {
-                'limit': int(
-                    open_price * (
-                        1 + self.trade['order']['limit_spread'] * {
-                            'BUY': - 1, 'SELL': 1
-                        }[open_side]
-                    )
-                ),
-                'take_profit': int(
-                    open_price * (
-                        1 + self.trade['order']['take_profit'] * {
-                            'BUY': 1, 'SELL': - 1
-                        }[open_side]
-                    )
-                ),
-                'stop_loss': int(
-                    open_price * (
-                        1 + self.trade['order']['stop_loss'] * {
-                            'BUY': - 1, 'SELL': 1
-                        }[open_side]
-                    )
-                )
-            }
-            penalized_side, sfd_near_dist = self._calc_deviation(
-                tickers=tickers
-            )
+            order_sides, order_prices = self._design_order(tickers=tickers)
+            sfd_near_dist = self._calc_sfd_dist(tickers=tickers)
 
         if (
                 sfd_near_dist > self.trade['skip_sfd_dist'] and (
-                    (pos_side and pos_side != open_side) or (
+                    (pos_side and pos_side != order_sides['open']) or (
                         pos_size <= self.trade['size']['max'] and
                         keep_rate >= self.trade['min_keep_rate']
                     )
@@ -163,11 +167,11 @@ class BfStreamTrader(SubscribeCallback):
                     self.bF.sendchildorder(
                         product_code=self.fx_pair,
                         child_order_type='MARKET',
-                        side=open_side,
+                        side=order_sides['open'],
                         size=self.trade['size']['unit'],
                         time_in_force='IOC'
                     )
-                    if pos_side and pos_side != open_side else
+                    if pos_side and pos_side != order_sides['open'] else
                     self.bF.sendparentorder(
                         order_method='IFDOCO',
                         time_in_force='GTC',
@@ -175,21 +179,21 @@ class BfStreamTrader(SubscribeCallback):
                             {
                                 'product_code': self.fx_pair,
                                 'condition_type': 'LIMIT',
-                                'side': open_side,
+                                'side': order_sides['open'],
                                 'price': order_prices['limit'],
                                 'size': self.trade['size']['unit']
                             },
                             {
                                 'product_code': self.fx_pair,
                                 'condition_type': 'LIMIT',
-                                'side': close_side,
+                                'side': order_sides['close'],
                                 'price': order_prices['take_profit'],
                                 'size': self.trade['size']['unit']
                             },
                             {
                                 'product_code': self.fx_pair,
                                 'condition_type': 'STOP',
-                                'side': close_side,
+                                'side': order_sides['close'],
                                 'trigger_price': order_prices['stop_loss'],
                                 'size': self.trade['size']['unit']
                             }
@@ -207,10 +211,11 @@ class BfStreamTrader(SubscribeCallback):
                             '{0} {1} {2} with {3}.\t'
                             '[ BUY: {4:.2f}, SELL: {5:.2f} ]'
                         ).format(
-                            open_side, self.trade['size']['unit'],
+                            order_sides['open'], self.trade['size']['unit'],
                             self.fx_pair,
                             (
-                                'MARKET' if pos_side and pos_side != open_side
+                                'MARKET'
+                                if pos_side and pos_side != order_sides['open']
                                 else 'IFDOCO (IFD: {0} => OCO: {1})'.format(
                                     order_prices['limit'],
                                     sorted([
@@ -233,12 +238,12 @@ class BfStreamTrader(SubscribeCallback):
             )
 
 
-def open_deal(config, pair='BTC_JPY', quiet=False):
+def open_deal(config, pair='BTC_JPY', wait=0, quiet=False):
     bas = BfAsyncSubscriber(
         channels=['lightning_executions_FX_{}'.format(pair)]
     )
     bas.pubnub.add_listener(
-        BfStreamTrader(pair=pair, config=config, quiet=quiet)
+        BfStreamTrader(pair=pair, config=config, wait=wait, quiet=quiet)
     )
     bas.subscribe()
     signal.signal(signal.SIGINT, signal.SIG_DFL)

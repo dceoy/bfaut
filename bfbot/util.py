@@ -10,12 +10,6 @@ class BfbotError(Exception):
     pass
 
 
-def set_log_config(debug=False):
-    logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S',
-                        level=logging.DEBUG if debug else logging.WARNING)
-
-
 def read_yaml(path):
     with open(path) as f:
         d = yaml.load(f)

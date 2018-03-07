@@ -5,7 +5,8 @@ bF bot trader
 Usage:
     bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
     bfbot init [--debug] [--file=<yaml>]
-    bfbot auto [--debug] [--pair=<code>] [--file=<yaml>] [--quiet]
+    bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--wait=<sec>]
+               [--quiet]
     bfbot -h|--help
     bfbot -v|--version
 
@@ -14,8 +15,9 @@ Options:
     -v, --version       Print version and exit
     --debug             Execute a command with debug messages
     --sqlite=<path>     Save data in an SQLite3 database
-    --pair=<code>       Set an actual currency pair [default: BTC_JPY]
     --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
+    --pair=<code>       Set an actual currency pair [default: BTC_JPY]
+    --wait=<sec>        Wait for loading [default: 20]
     --quiet             Suppress messages
 
 Commands:
@@ -33,13 +35,12 @@ from docopt import docopt
 from . import __version__
 from .streamer import stream_rate
 from .trader import open_deal
-from .util import set_log_config, set_config_yml, write_config_yml, \
-                  read_yaml
+from .util import set_config_yml, write_config_yml, read_yaml
 
 
 def main():
     args = docopt(__doc__, version='bfbot {}'.format(__version__))
-    set_log_config(debug=args['--debug'])
+    set_log_config(args)
     logging.debug('args:{0}{1}'.format(os.linesep, args))
     config_yml = set_config_yml(path=args['--file'])
 
@@ -61,5 +62,18 @@ def main():
             open_deal(
                 config=config,
                 pair=args['--pair'],
+                wait=args['--wait'],
                 quiet=args['--quiet']
             )
+
+
+def set_log_config(args):
+    logging.basicConfig(
+        format='%(asctime)s %(levelname)-8s %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        level=(
+            logging.DEBUG if args['--debug'] else (
+                logging.INFO if args['--info'] else logging.WARNING
+            )
+        )
+    )
