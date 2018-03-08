@@ -1,6 +1,6 @@
 FROM python
 
-ADD . /tmp/bftrader
+ADD . /tmp/bfbot
 
 RUN set -e \
       && ln -sf /bin/bash /bin/sh
@@ -12,8 +12,7 @@ RUN set -e \
       && apt-get clean
 
 RUN set -e \
-      && pip install -U --no-cache-dir pip pybitflyer \
-      && pip install -U --no-cache-dir /tmp/bftrader \
+      && pip install -U --no-cache-dir pip /tmp/bfbot \
       && rm -rf /tmp/*
 
 ENTRYPOINT ["bfbot"]

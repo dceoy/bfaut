@@ -2,12 +2,14 @@
 
 from datetime import datetime, timedelta
 import logging
+import os
 import signal
 import numpy as np
 import pandas as pd
 from pubnub.callbacks import SubscribeCallback
 import pybitflyer
 from .streamer import BfAsyncSubscriber
+from .util import BfbotError, dump_yaml
 
 
 class BfStreamTrader(SubscribeCallback):
@@ -48,15 +50,7 @@ class BfStreamTrader(SubscribeCallback):
                 datetime.now()
             )
             if time_left < timedelta(seconds=0):
-                volume_diff = abs(np.diff(self.weighted_volumes)[0])
-                self.logger.info('volume_diff: {}'.format(volume_diff))
-                if volume_diff > self.trade['volume']['min_diff']:
-                    self._trade()
-                else:
-                    self._print(
-                        'Skip by volume balance. '
-                        '(EWMA volume difference: {:.6f})'.format(volume_diff)
-                    )
+                self._trade()
             else:
                 self.logger.info('time_left: {}'.format(time_left))
             self.prefix_msg = None
@@ -74,29 +68,38 @@ class BfStreamTrader(SubscribeCallback):
 
     def _fetch_state(self):
         collateral = self.bF.getcollateral()
-        self.logger.debug(collateral)
-        keep_rate = collateral.get('keep_rate')
-        self.logger.info('keep_rate: {}'.format(keep_rate))
+        if isinstance(collateral, dict):
+            self.logger.debug(collateral)
+            keep_rate = collateral['keep_rate']
+            self.logger.info('keep_rate: {}'.format(keep_rate))
+        else:
+            raise BfbotError(collateral)
 
         positions = self.bF.getpositions(product_code=self.fx_pair)
-        self.logger.info('positions: {}'.format(positions))
-        pos_sizes = {
-            s: np.sum([p.get('size') for p in positions if p.get('side') == s])
-            for s in ['SELL', 'BUY']
-        }
-        pos_size = max(pos_sizes.values())
-        pos_side = (
-            [k for k, v in pos_sizes.items() if v == pos_size][0]
-            if pos_size > 0 else None
-        )
-        self.logger.info('pos_side: {0}, pos_size: {1}'.format(
-            pos_side, pos_size
-        ))
+        if isinstance(positions, list):
+            self.logger.info('positions: {}'.format(positions))
+            pos_sizes = {
+                s: np.sum([p['size'] for p in positions if p['side'] == s])
+                for s in ['SELL', 'BUY']
+            }
+            pos_size = max(pos_sizes.values())
+            pos_side = (
+                [k for k, v in pos_sizes.items() if v == pos_size][0]
+                if pos_size > 0 else None
+            )
+            self.logger.info('pos_side: {0}, pos_size: {1}'.format(
+                pos_side, pos_size
+            ))
+        else:
+            raise BfbotError(positions)
 
         tickers = {
             p: self.bF.ticker(product_code=p)
             for p in [self.pair, self.fx_pair]
         }
+        for t in tickers.values():
+            if not isinstance(t, dict):
+                raise BfbotError(t)
         self.logger.debug(tickers)
         return keep_rate, pos_side, pos_size, tickers
 
@@ -164,53 +167,44 @@ class BfStreamTrader(SubscribeCallback):
             return
         else:
             order_sides = self._determine_order_sides()
+            order_is_open = (pos_side == order_sides['open'])
             order_targets = (
                 self._calc_order_targets(
                     tickers=tickers, order_sides=order_sides
                 ) if self.ifdoco else None
             )
+            volume_diff = abs(np.diff(self.weighted_volumes)[0])
             penal_side, sfd_near_dist = self._calc_sfd_stat(tickers=tickers)
 
-        if sfd_near_dist < self.trade['skip_sfd_dist']:
+        if order_sides['open'] == penal_side:
+            self._print(
+                'Skip by sfd penalty. '
+                '(penalized side: {:.6f})'.format(penal_side)
+            )
+        elif sfd_near_dist < self.trade['skip_sfd_dist']:
             self._print(
                 'Skip by sfd boundary. '
                 '(distance to a sfd pin: {:.6f})'.format(sfd_near_dist)
             )
-        elif order_sides['open'] == penal_side:
+        elif pos_size >= self.trade['size']['max'] and order_is_open:
             self._print(
-                'Skip by sfd penalty. '
-                '(penalized side: {})'.format(penal_side)
+                'Skip by position limit. '
+                '(current position size: {:.6f})'.format(pos_size)
             )
-        elif (
-            order_sides['open'] == pos_side and
-            keep_rate < self.trade['min_keep_rate']
-        ):
+        elif keep_rate < self.trade['min_keep_rate'] and order_is_open:
             self._print(
                 'Skip by margin retention rate. '
                 '(current retention rate: {:.6f})'.format(keep_rate)
             )
-        elif (
-            order_sides['open'] == pos_side and
-            pos_size >= self.trade['size']['max']
-        ):
+        elif volume_diff < self.trade['volume']['min_diff'] and order_is_open:
             self._print(
-                'Skip by position limit. '
-                '(current position size: {:.2f})'.format(pos_size)
+                'Skip by volume balance. '
+                '(EWMA volume difference: {:.6f})'.format(volume_diff)
             )
         else:
             try:
-                is_market = (
-                    not self.ifdoco or
-                    (pos_side and pos_side != order_sides['open'])
-                )
                 order = (
-                    self.bF.sendchildorder(
-                        product_code=self.fx_pair,
-                        child_order_type='MARKET',
-                        side=order_sides['open'],
-                        size=self.trade['size']['unit'],
-                        time_in_force='IOC'
-                    ) if is_market else self.bF.sendparentorder(
+                    self.bF.sendparentorder(
                         order_method='IFDOCO',
                         time_in_force='GTC',
                         parameters=[
@@ -236,30 +230,61 @@ class BfStreamTrader(SubscribeCallback):
                                 'size': self.trade['size']['unit']
                             }
                         ]
+                    ) if self.ifdoco and order_is_open else
+                    self.bF.sendchildorder(
+                        product_code=self.fx_pair,
+                        child_order_type='MARKET',
+                        side=order_sides['open'],
+                        size=self.trade['size']['unit'],
+                        time_in_force='FOK'
                     )
                 )
             except Exception as e:
                 self.logger.error(e)
                 return
             else:
-                self.logger.debug(order)
-                if order.get('status') != - 205:
+                self.logger.info(order)
+                order_is_accepted = (
+                    isinstance(order, dict) and (
+                        'child_order_acceptance_id' in order or
+                        'parent_order_acceptance_id' in order
+                    )
+                )
+                if order_is_accepted:
                     self._print(
-                        '{0} {1} {2} with {3}.'.format(
+                        'Accepted: {0} {1} {2} with {3}.'.format(
                             order_sides['open'], self.trade['size']['unit'],
                             self.fx_pair,
                             (
-                                'MARKET' if is_market else
                                 'IFDOCO (IFD: {0} => OCO: {1})'.format(
                                     order_targets['limit'],
                                     sorted([
                                         order_targets['stop_loss'],
                                         order_targets['take_profit']
                                     ])
-                                )
+                                ) if self.ifdoco and order_is_open else
+                                'MARKET'
                             )
                         )
                     )
+                else:
+                    self._print(
+                        'Rejected: {0} {1} {2} with {3}.'.format(
+                            order_sides['open'], self.trade['size']['unit'],
+                            self.fx_pair,
+                            (
+                                'IFDOCO (IFD: {0} => OCO: {1})'.format(
+                                    order_targets['limit'],
+                                    sorted([
+                                        order_targets['stop_loss'],
+                                        order_targets['take_profit']
+                                    ])
+                                ) if self.ifdoco and order_is_open else
+                                'MARKET'
+                            )
+                        )
+                    )
+                    self.logger.warning(os.linesep + dump_yaml(order))
 
 
 def open_deal(config, pair='BTC_JPY', wait=0, ifdoco=False, quiet=False):
