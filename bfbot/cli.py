@@ -5,8 +5,8 @@ bF bot trader
 Usage:
     bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
     bfbot init [--debug] [--file=<yaml>]
-    bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--wait=<sec>]
-               [--ifdoco] [--quiet]
+    bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>]
+               [--timeout=<sec>] [--ifdoco] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
 
@@ -17,7 +17,7 @@ Options:
     --sqlite=<path>     Save data in an SQLite3 database
     --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
-    --wait=<sec>        Wait for loading [default: 10]
+    --timeout=<sec>     Set senconds for timeout [default: 3600]
     --ifdoco            Use IFDOCO order for opening
     --quiet             Suppress messages
 
@@ -63,7 +63,7 @@ def main():
             open_deal(
                 config=config,
                 pair=args['--pair'],
-                wait=args['--wait'],
+                timeout=args['--timeout'],
                 ifdoco=args['--ifdoco'],
                 quiet=args['--quiet']
             )

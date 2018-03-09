@@ -11,5 +11,6 @@ services:
       BFBOT_YML: /host/bfbot.yml
     volumes:
       - ${HOME}:/host
+    working_dir: /host
     command:
       - auto
