@@ -6,7 +6,9 @@ import pandas as pd
 from pubnub.callbacks import SubscribeCallback
 from pubnub.pnconfiguration import PNConfiguration, PNReconnectionPolicy
 from pubnub.pubnub_tornado import PubNubTornado
+import pybitflyer
 from tornado import gen
+from .util import dump_yaml
 
 
 class BfAsyncSubscriber:
@@ -61,3 +63,25 @@ def stream_rate(channels, sqlite_path=None, quiet=False):
     bas.subscribe()
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     bas.pubnub.start()
+
+
+def print_states(config, pair):
+    bF = pybitflyer.API(
+        api_key=config['bF']['api_key'],
+        api_secret=config['bF']['api_secret']
+    )
+    fx_pair = 'FX_' + pair
+    print(dump_yaml({
+        'balance': bF.getbalance(),
+        'collateral': bF.getcollateral(),
+        'positions': bF.getpositions(product_code=fx_pair),
+        'childorders': [
+            d for d in bF.getchildorders(product_code=fx_pair)
+            if d.get('child_order_state') == 'ACTIVE'
+        ],
+        'parentorders': [
+            d for d in bF.getparentorders(product_code=fx_pair)
+            if d.get('parent_order_state') == 'ACTIVE'
+        ],
+        'tickers': {p: bF.ticker(product_code=p) for p in [pair, fx_pair]}
+    }))

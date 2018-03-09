@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from pubnub.callbacks import SubscribeCallback
 import pybitflyer
-from .streamer import BfAsyncSubscriber
+from .info import BfAsyncSubscriber
 from .util import BfbotError, dump_yaml
 
 

@@ -5,6 +5,7 @@ bF bot trader
 Usage:
     bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
     bfbot init [--debug] [--file=<yaml>]
+    bfbot state [--debug] [--file=<yaml>] [--pair=<code>]
     bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>]
                [--timeout=<sec>] [--ifdoco] [--quiet]
     bfbot -h|--help
@@ -22,8 +23,9 @@ Options:
     --quiet             Suppress messages
 
 Commands:
-    init                Generate a YAML template for configuration
     stream              Stream rate
+    init                Generate a YAML template for configuration
+    state               Print states of market and account
     auto                Open autonomous trading
 
 Arguments:
@@ -34,7 +36,7 @@ import logging
 import os
 from docopt import docopt
 from . import __version__
-from .streamer import stream_rate
+from .info import print_states, stream_rate
 from .trader import open_deal
 from .util import set_config_yml, write_config_yml, read_yaml
 
@@ -67,6 +69,9 @@ def main():
                 ifdoco=args['--ifdoco'],
                 quiet=args['--quiet']
             )
+        elif args['state']:
+            logging.debug('Print states')
+            print_states(config=config, pair=args['--pair'])
 
 
 def set_log_config(args):
