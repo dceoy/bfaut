@@ -2,7 +2,6 @@ bF:
   api_key: null
   api_secret: null
 trade:
-  min_keep_rate: 1
   order:
     limit_spread: 0.00001
     stop_loss: 0.001

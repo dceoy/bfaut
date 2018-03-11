@@ -32,6 +32,8 @@ class BfStreamTrader(SubscribeCallback):
         self.reserved_side = None
         self.reserved_size = None
         self.order_datetime = None
+        self.order_size = None
+        self.asset = None
         self.logger = logging.getLogger(__name__)
 
     def message(self, pubnub, message):
@@ -71,8 +73,7 @@ class BfStreamTrader(SubscribeCallback):
         collateral = self.bF.getcollateral()
         if isinstance(collateral, dict):
             self.logger.debug(collateral)
-            keep_rate = collateral['keep_rate']
-            self.logger.info('keep_rate: {}'.format(keep_rate))
+            self.logger.info('collateral: {}'.format(collateral))
         else:
             raise BfbotError(collateral)
 
@@ -102,7 +103,7 @@ class BfStreamTrader(SubscribeCallback):
             if not isinstance(t, dict):
                 raise BfbotError(t)
         self.logger.debug(tickers)
-        return keep_rate, pos_side, pos_size, tickers
+        return collateral, pos_side, pos_size, tickers
 
     def _calc_sfd_stat(self, tickers):
         mp = {
@@ -162,7 +163,7 @@ class BfStreamTrader(SubscribeCallback):
 
     def _trade(self):
         try:
-            keep_rate, pos_side, pos_size, tickers = self._fetch_state()
+            collateral, pos_side, pos_size, tickers = self._fetch_state()
         except Exception as e:
             self.logger.error(e)
             return
@@ -184,6 +185,14 @@ class BfStreamTrader(SubscribeCallback):
                     self.reserved_side, self.reserved_size
                 )
             )
+            self.order_size = (
+                min(
+                    self.order_size + self.trade['size']['unit'],
+                    self.trade['size']['max']
+                ) if self.asset and self.asset > collateral['collateral']
+                else self.trade['size']['unit']
+            )
+            self.asset = collateral['collateral']
             order_sides = self._determine_order_sides()
             order_is_open = (
                 self.reserved_size < 0.001 or
@@ -221,10 +230,12 @@ class BfStreamTrader(SubscribeCallback):
                     pos_size, self.reserved_size
                 )
             )
-        elif 0 < keep_rate < self.trade['min_keep_rate'] and order_is_open:
+        elif self.reserved_side:
             self._print(
-                'Skip by margin retention rate. '
-                '(current retention rate: {:.6f})'.format(keep_rate)
+                'Skip by reserved position. '
+                '(reserved side: {:.3f}, reserved size: {:.3f})'.format(
+                    self.reserved_size, self.reserved_size
+                )
             )
         elif volume_diff < self.trade['volume']['min_diff'] and order_is_open:
             self._print(
