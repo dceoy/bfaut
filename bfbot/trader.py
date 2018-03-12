@@ -43,7 +43,9 @@ class BfStreamTrader(SubscribeCallback):
         )[['side', 'size']].append(
             pd.DataFrame({'side': ['BUY', 'SELL'], 'size': [0, 0]})
         ).groupby('side')['size'].sum()
-        self.prefix_msg = {'VOLUME': {k: v for k, v in volumes.items()}}
+        self.prefix_msg = '| BUY:{:8.3f} | SELL:{:8.3f} |'.format(
+            volumes['BUY'], volumes['SELL']
+        )
         volume_diff = volumes['BUY'] - volumes['SELL']
         if self.vd_ewm is None:
             self.vd_ewm = {
@@ -82,7 +84,7 @@ class BfStreamTrader(SubscribeCallback):
                 self.logger.info('self.n_to_load: {}'.format(self.n_to_load))
 
     def _print(self, message, prompt='>>>'):
-        text = '\t'.join([s for s in [prompt, self.prefix_msg, message] if s])
+        text = '{0}   {1}   {2}'.format(self.prefix_msg, prompt, message)
         if self.quiet:
             self.logger.info(text)
         else:
@@ -90,7 +92,7 @@ class BfStreamTrader(SubscribeCallback):
 
     def _fetch_state(self):
         collateral = self.bF.getcollateral()
-        if isinstance(collateral, dict):
+        if isinstance(collateral, dict) and 'collateral' in collateral:
             self.logger.debug(collateral)
             self.logger.info('collateral: {}'.format(collateral))
         else:
@@ -178,7 +180,7 @@ class BfStreamTrader(SubscribeCallback):
             if (
                     self.reserved_size is not None and
                     self.order_datetime and
-                    abs(self.reserved_size - pos_size) * 1000 >= 1 and
+                    abs(self.reserved_size - pos_size) >= 0.001 and
                     datetime.now() - self.order_datetime < self.timeout_delta
             ):
                 self.logger.info('Wait for execution.')
@@ -201,7 +203,7 @@ class BfStreamTrader(SubscribeCallback):
                     order_side = 'BUY'
                 else:
                     order_side = None
-                order_size = (
+                order_size = float(str(np.float16(
                     min(
                         self.last_open_size + self.trade['size']['unit'],
                         self.trade['size']['max']
@@ -210,7 +212,7 @@ class BfStreamTrader(SubscribeCallback):
                         self.last_collat and
                         self.last_collat > collateral['collateral']
                     ) else self.trade['size']['unit']
-                )
+                )))
                 order_targets = (
                     self._calc_order_targets(
                         tickers=tickers, order_side=order_side
@@ -223,42 +225,18 @@ class BfStreamTrader(SubscribeCallback):
                     order_side = 'BUY'
                 else:
                     order_side = None
-                order_size = self.reserved_size
+                order_size = float(str(np.float16(self.reserved_size)))
                 order_targets = None
             reverse_order_side = (
                 {'BUY': 'SELL', 'SELL': 'BUY'}[order_side]
                 if order_side else None
             )
 
-        if order_side == penal_side:
-            self._print(
-                'Skip by sfd penalty. '
-                '(penalized side: {})'.format(penal_side)
-            )
-        elif sfd_near_dist < self.trade['skip_sfd_dist']:
-            self._print(
-                'Skip by sfd boundary. '
-                '(distance to a sfd pin: {:.6f})'.format(sfd_near_dist)
-            )
-        elif order_is_open and self.reserved_size >= self.trade['size']['max']:
-            self._print(
-                'Skip by position limit. '
-                '(position size: {:.3f}, reserved size: {:.3f})'.format(
-                    pos_size, self.reserved_size
-                )
-            )
-        elif abs(self.reserved_size - pos_size) * 1000 >= 1:
+        if abs(self.reserved_size - pos_size) >= 0.001:
             self._print(
                 'Skip by queued execution. '
                 '(position size: {:.3f}, reserved size: {:.3f})'.format(
                     pos_size, self.reserved_size
-                )
-            )
-        elif self.reserved_side:
-            self._print(
-                'Skip by reserved position. '
-                '(reserved side: {:.3f}, reserved size: {:.3f})'.format(
-                    self.reserved_size, self.reserved_size
                 )
             )
         elif order_side is None:
@@ -274,6 +252,16 @@ class BfStreamTrader(SubscribeCallback):
                     'Skip by volume balance. (EWM volume '
                     'diff: {:.3f})'.format(self.vd_ewm['mean'])
                 )
+        elif order_side == penal_side:
+            self._print(
+                'Skip by sfd penalty. '
+                '(penalized side: {})'.format(penal_side)
+            )
+        elif sfd_near_dist < self.trade['skip_sfd_dist']:
+            self._print(
+                'Skip by sfd boundary. '
+                '(distance to a sfd pin: {:.6f})'.format(sfd_near_dist)
+            )
         else:
             try:
                 order = (
@@ -387,5 +375,5 @@ def open_deal(config, pair, ifdoco=False, timeout=3600, quiet=False):
     bas.subscribe()
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     if not quiet:
-        print('>>>\t!!! OPEN DEAL !!!')
+        print('>>>  !!! OPEN DEAL !!!')
     bas.pubnub.start()
