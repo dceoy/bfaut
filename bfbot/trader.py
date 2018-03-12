@@ -27,37 +27,56 @@ class BfStreamTrader(SubscribeCallback):
             api_secret=config['bF']['api_secret']
         )
         self.start_datetime = None
-        self.weighted_volumes = None
+        self.vd_ewm = None
+        self.vd_bollinger = None
         self.prefix_msg = None
         self.reserved_side = None
         self.reserved_size = None
         self.order_datetime = None
-        self.order_size = None
-        self.asset = None
+        self.last_open_size = None
+        self.last_collat = None
         self.logger = logging.getLogger(__name__)
 
     def message(self, pubnub, message):
-        new_volumes = pd.DataFrame(
+        volumes = pd.DataFrame(
             message.message
         )[['side', 'size']].append(
             pd.DataFrame({'side': ['BUY', 'SELL'], 'size': [0, 0]})
         ).groupby('side')['size'].sum()
-        if self.weighted_volumes is None:
-            self.weighted_volumes = new_volumes
+        self.prefix_msg = {'VOLUME': {k: v for k, v in volumes.items()}}
+        volume_diff = volumes['BUY'] - volumes['SELL']
+        if self.vd_ewm is None:
+            self.vd_ewm = {
+                'mean': volume_diff, 'var': np.square(volume_diff)
+            }
             self._print('Wait for loading...')
             self.n_to_load -= 1
         else:
-            self.weighted_volumes = (
-                self.trade['volume']['ewma_alpha'] * new_volumes +
-                (1 - self.trade['volume']['ewma_alpha']) *
-                self.weighted_volumes
+            self.vd_ewm = {
+                'mean': (
+                    self.trade['volume_ewm']['alpha'] * volume_diff +
+                    (1 - self.trade['volume_ewm']['alpha']) *
+                    self.vd_ewm['mean']
+                ),
+                'var': (
+                    (1 - self.trade['volume_ewm']['alpha']) * (
+                        self.vd_ewm['var'] +
+                        self.trade['volume_ewm']['alpha'] *
+                        np.square(volume_diff - self.vd_ewm['mean'])
+                    )
+                )
+            }
+            self.logger.info(
+                'self.vd_ewm: {}'.format(self.vd_ewm)
             )
-            self.prefix_msg = '[ BUY: {0:.2f}, SELL: {1:.2f} ]'.format(
-                self.weighted_volumes['BUY'], self.weighted_volumes['SELL']
+            self.vd_bollinger = (
+                np.array([- 1, 1]) *
+                self.trade['volume_ewm']['trigger_sigma'] +
+                np.sqrt(self.vd_ewm['var']) *
+                self.vd_ewm['mean']
             )
             if self.n_to_load == 0:
                 self._trade()
-                self.prefix_msg = None
             else:
                 self.n_to_load -= 1
                 self.logger.info('self.n_to_load: {}'.format(self.n_to_load))
@@ -89,9 +108,9 @@ class BfStreamTrader(SubscribeCallback):
                 [k for k, v in pos_sizes.items() if v == pos_size][0]
                 if pos_size > 0 else None
             )
-            self.logger.info('pos_side: {0}, pos_size: {1}'.format(
-                pos_side, pos_size
-            ))
+            self.logger.info(
+                'pos_side: {0}, pos_size: {1}'.format(pos_side, pos_size)
+            )
         else:
             raise BfbotError(positions)
 
@@ -122,39 +141,27 @@ class BfStreamTrader(SubscribeCallback):
         ))
         return penal_side, sfd_near_dist
 
-    def _determine_order_sides(self):
-        open_side = self.weighted_volumes.idxmax()
-        order_sides = {
-            'fw': open_side,
-            'rv': {'BUY': 'SELL', 'SELL': 'BUY'}[open_side]
-        }
-        self.logger.info('order_sides: {}'.format(order_sides))
-        return order_sides
-
-    def _calc_order_targets(self, tickers, order_sides):
+    def _calc_order_targets(self, tickers, order_side):
         base_price = tickers[self.fx_pair][
-            {'BUY': 'best_ask', 'SELL': 'best_bid'}[order_sides['fw']]
+            {'BUY': 'best_ask', 'SELL': 'best_bid'}[order_side]
         ]
         order_targets = {
             'limit': int(
                 base_price * (
-                    1 + self.trade['order']['limit_spread'] * {
-                        'BUY': - 1, 'SELL': 1
-                    }[order_sides['fw']]
+                    1 + self.trade['order']['limit_spread'] *
+                    {'BUY': - 1, 'SELL': 1}[order_side]
                 )
             ),
             'take_profit': int(
                 base_price * (
-                    1 + self.trade['order']['take_profit'] * {
-                        'BUY': 1, 'SELL': - 1
-                    }[order_sides['fw']]
+                    1 + self.trade['order']['take_profit'] *
+                    {'BUY': 1, 'SELL': - 1}[order_side]
                 )
             ),
             'stop_loss': int(
                 base_price * (
-                    1 + self.trade['order']['stop_loss'] * {
-                        'BUY': - 1, 'SELL': 1
-                    }[order_sides['fw']]
+                    1 + self.trade['order']['stop_loss'] *
+                    {'BUY': - 1, 'SELL': 1}[order_side]
                 )
             )
         }
@@ -185,28 +192,45 @@ class BfStreamTrader(SubscribeCallback):
                     self.reserved_side, self.reserved_size
                 )
             )
-            self.order_size = (
-                min(
-                    self.order_size + self.trade['size']['unit'],
-                    self.trade['size']['max']
-                ) if self.asset and self.asset > collateral['collateral']
-                else self.trade['size']['unit']
-            )
-            self.asset = collateral['collateral']
-            order_sides = self._determine_order_sides()
-            order_is_open = (
-                self.reserved_size < 0.001 or
-                self.reserved_side == order_sides['fw']
-            )
-            order_targets = (
-                self._calc_order_targets(
-                    tickers=tickers, order_sides=order_sides
-                ) if self.ifdoco else None
-            )
-            volume_diff = abs(np.diff(self.weighted_volumes)[0])
             penal_side, sfd_near_dist = self._calc_sfd_stat(tickers=tickers)
+            order_is_open = (self.reserved_size < self.trade['size']['unit'])
+            if order_is_open:
+                if max(self.vd_bollinger) < 0:
+                    order_side = 'SELL'
+                elif min(self.vd_bollinger) > 0:
+                    order_side = 'BUY'
+                else:
+                    order_side = None
+                order_size = (
+                    min(
+                        self.last_open_size + self.trade['size']['unit'],
+                        self.trade['size']['max']
+                    ) if (
+                        self.last_open_size and
+                        self.last_collat and
+                        self.last_collat > collateral['collateral']
+                    ) else self.trade['size']['unit']
+                )
+                order_targets = (
+                    self._calc_order_targets(
+                        tickers=tickers, order_side=order_side
+                    ) if self.ifdoco else None
+                )
+            else:
+                if self.reserved_side == 'BUY' and self.vd_ewm['mean'] < 0:
+                    order_side = 'SELL'
+                elif self.reserved_side == 'SELL' and self.vd_ewm['mean'] > 0:
+                    order_side = 'BUY'
+                else:
+                    order_side = None
+                order_size = self.reserved_size
+                order_targets = None
+            reverse_order_side = (
+                {'BUY': 'SELL', 'SELL': 'BUY'}[order_side]
+                if order_side else None
+            )
 
-        if order_sides['fw'] == penal_side:
+        if order_side == penal_side:
             self._print(
                 'Skip by sfd penalty. '
                 '(penalized side: {})'.format(penal_side)
@@ -216,7 +240,7 @@ class BfStreamTrader(SubscribeCallback):
                 'Skip by sfd boundary. '
                 '(distance to a sfd pin: {:.6f})'.format(sfd_near_dist)
             )
-        elif self.reserved_size >= self.trade['size']['max'] and order_is_open:
+        elif order_is_open and self.reserved_size >= self.trade['size']['max']:
             self._print(
                 'Skip by position limit. '
                 '(position size: {:.3f}, reserved size: {:.3f})'.format(
@@ -237,11 +261,19 @@ class BfStreamTrader(SubscribeCallback):
                     self.reserved_size, self.reserved_size
                 )
             )
-        elif volume_diff < self.trade['volume']['min_diff'] and order_is_open:
-            self._print(
-                'Skip by volume balance. '
-                '(EWMA volume difference: {:.6f})'.format(volume_diff)
-            )
+        elif order_side is None:
+            if order_is_open:
+                self._print(
+                    'Skip by volume balance. (EWM volume '
+                    'diff bollinger: [{0:.3f}, {1:.3f}])'.format(
+                        self.vd_bollinger[0], self.vd_bollinger[1]
+                    )
+                )
+            else:
+                self._print(
+                    'Skip by volume balance. (EWM volume '
+                    'diff: {:.3f})'.format(self.vd_ewm['mean'])
+                )
         else:
             try:
                 order = (
@@ -252,31 +284,31 @@ class BfStreamTrader(SubscribeCallback):
                             {
                                 'product_code': self.fx_pair,
                                 'condition_type': 'LIMIT',
-                                'side': order_sides['fw'],
+                                'side': order_side,
                                 'price': order_targets['limit'],
-                                'size': self.trade['size']['unit']
+                                'size': order_size
                             },
                             {
                                 'product_code': self.fx_pair,
                                 'condition_type': 'LIMIT',
-                                'side': order_sides['rv'],
+                                'side': reverse_order_side,
                                 'price': order_targets['take_profit'],
-                                'size': self.trade['size']['unit']
+                                'size': order_size
                             },
                             {
                                 'product_code': self.fx_pair,
                                 'condition_type': 'STOP',
-                                'side': order_sides['rv'],
+                                'side': reverse_order_side,
                                 'trigger_price': order_targets['stop_loss'],
-                                'size': self.trade['size']['unit']
+                                'size': order_size
                             }
                         ]
                     ) if self.ifdoco and order_is_open else
                     self.bF.sendchildorder(
                         product_code=self.fx_pair,
                         child_order_type='MARKET',
-                        side=order_sides['fw'],
-                        size=self.trade['size']['unit'],
+                        side=order_side,
+                        size=order_size,
                         time_in_force='GTC'
                     )
                 )
@@ -294,7 +326,7 @@ class BfStreamTrader(SubscribeCallback):
                 if order_is_accepted:
                     self._print(
                         'Accepted: {0} {1} {2} with {3}.'.format(
-                            order_sides['fw'], self.trade['size']['unit'],
+                            order_side, order_size,
                             self.fx_pair,
                             (
                                 'IFDOCO (IFD: {0} => OCO: {1})'.format(
@@ -310,20 +342,22 @@ class BfStreamTrader(SubscribeCallback):
                     )
                     self.order_datetime = datetime.now()
                     if order_is_open:
-                        self.reserved_size += self.trade['size']['unit']
-                        self.reserved_side = order_sides['fw']
+                        self.reserved_size += order_size
+                        self.reserved_side = order_side
+                        self.last_open_size = order_size
+                        self.last_collat = collateral['collateral']
                     else:
-                        self.reserved_size -= self.trade['size']['unit']
+                        self.reserved_size -= order_size
                         if abs(self.reserved_size) < 0.001:
                             self.reserved_side = None
                         elif self.reserved_size <= - 0.001:
-                            self.reserved_side = order_sides['fw']
+                            self.reserved_side = order_side
                         else:
-                            self.reserved_side = order_sides['rv']
+                            self.reserved_side = reverse_order_side
                 else:
                     self._print(
                         'Rejected: {0} {1} {2} with {3}.'.format(
-                            order_sides['fw'], self.trade['size']['unit'],
+                            order_side, order_size,
                             self.fx_pair,
                             (
                                 'IFDOCO (IFD: {0} => OCO: {1})'.format(

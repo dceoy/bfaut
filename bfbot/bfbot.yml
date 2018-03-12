@@ -10,6 +10,6 @@ trade:
     max: 1
     unit: 0.01
   skip_sfd_dist: 0.001
-  volume:
-    ewma_alpha: 0.01
-    min_diff: 0.1
+  volume_ewm:
+    alpha: 0.01
+    trigger_sigma: 2
