@@ -34,6 +34,7 @@ class BfStreamTrader(SubscribeCallback):
         self.order_datetime = None
         self.last_open_size = None
         self.last_collat = None
+        self.oversized_alert = False
         self.logger = logging.getLogger(__name__)
 
     def message(self, pubnub, message):
@@ -50,7 +51,6 @@ class BfStreamTrader(SubscribeCallback):
             self.vd_ewm = {
                 'mean': volume_diff, 'var': np.square(volume_diff)
             }
-            self._print('Wait for loading...')
             self.n_to_load -= 1
         else:
             self.vd_ewm = {
@@ -81,6 +81,7 @@ class BfStreamTrader(SubscribeCallback):
             else:
                 self.n_to_load -= 1
                 self.logger.info('self.n_to_load: {}'.format(self.n_to_load))
+                self._print('Wait for loading of executions...')
 
     def _print(self, message, prompt='>>'):
         text = '{0}   {1}   {2}'.format(self.prefix_msg, prompt, message)
@@ -93,7 +94,8 @@ class BfStreamTrader(SubscribeCallback):
         collateral = self.bF.getcollateral()
         if isinstance(collateral, dict) and 'collateral' in collateral:
             self.logger.debug(collateral)
-            self.logger.info('collateral: {}'.format(collateral))
+            collat = collateral['collateral']
+            self.logger.info('collat: {}'.format(collat))
         else:
             raise BfbotError(collateral)
 
@@ -123,7 +125,7 @@ class BfStreamTrader(SubscribeCallback):
             if not isinstance(t, dict):
                 raise BfbotError(t)
         self.logger.debug(tickers)
-        return collateral, pos_side, pos_size, tickers
+        return collat, pos_side, pos_size, tickers
 
     def _calc_sfd_stat(self, tickers):
         mp = {
@@ -145,8 +147,11 @@ class BfStreamTrader(SubscribeCallback):
     def _calc_bet_size(self, won=True):
         if self.trade['bet'] == 'Martingale':
             bet_size = (
-                self.trade['size']['unit'] if won
-                else self.last_open_size * 2
+                self.trade['size']['unit'] if won else round(
+                    self.last_open_size * (
+                        self.trade['size'].get('multiplier') or 2
+                    ) * 1000
+                ) / 1000
             )
         elif self.trade['bet'] == "d'Alembert":
             bet_size = (
@@ -160,11 +165,11 @@ class BfStreamTrader(SubscribeCallback):
             )
         else:
             bet_size = self.trade['size']['unit']
-        return min(bet_size, self.trade['size']['max'])
+        return min(bet_size, self.trade['size'].get('max') or bet_size)
 
     def _trade(self):
         try:
-            collateral, pos_side, pos_size, tickers = self._fetch_state()
+            collat, pos_side, pos_size, tickers = self._fetch_state()
         except Exception as e:
             self.logger.error(e)
             return
@@ -196,10 +201,10 @@ class BfStreamTrader(SubscribeCallback):
                 else:
                     order_side = None
                 order_size = float(str(np.float16(
-                    self._calc_bet_size(
-                        won=(self.last_collat < collateral['collateral'])
-                    ) if self.last_open_size and self.last_collat
-                    else self.trade['size']['unit']
+                    self._calc_bet_size(won=(self.last_collat < collat)) if (
+                        self.last_open_size and self.last_collat and
+                        not self.oversized_alert
+                    ) else self.trade['size']['unit']
                 )))
             else:
                 if self.reserved_side == 'BUY' and self.vd_ewm['mean'] < 0:
@@ -213,11 +218,12 @@ class BfStreamTrader(SubscribeCallback):
                 {'BUY': 'SELL', 'SELL': 'BUY'}[order_side]
                 if order_side else None
             )
+            self.oversized_alert = False
 
         if abs(self.reserved_size - pos_size) >= 0.001:
             self._print(
-                'Skip by queued execution. (position: {0} {1} {2})'.format(
-                    self.reserved_side, self.reserved_size, self.fx_pair
+                'Skip by queued execution. (side: {0}, size: {1})'.format(
+                    self.reserved_side, self.reserved_size
                 )
             )
         elif order_side is None:
@@ -274,7 +280,7 @@ class BfStreamTrader(SubscribeCallback):
                         self.reserved_size += order_size
                         self.reserved_side = order_side
                         self.last_open_size = order_size
-                        self.last_collat = collateral['collateral']
+                        self.last_collat = collat
                     else:
                         self.reserved_size -= order_size
                         if abs(self.reserved_size) < 0.001:
@@ -285,10 +291,12 @@ class BfStreamTrader(SubscribeCallback):
                             self.reserved_side = reverse_order_side
                 else:
                     self._print(
-                        'Rejected: {0} {1} {2} with {3}.'.format(
+                        'Rejected: {0} {1} {2} with MARKET.'.format(
                             order_side, order_size, self.fx_pair
                         )
                     )
+                    if order.get('status') == - 205:
+                        self.oversized_alert = True
                     self.logger.warning(os.linesep + dump_yaml(order))
 
 

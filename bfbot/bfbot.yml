@@ -2,9 +2,10 @@ bF:
   api_key: ''
   api_secret: ''
 trade:
-  bet: "d'Alembert"   # Martingale | d'Alembert | Oscar's grind
+  bet: 'Martingale'   # Martingale | d'Alembert | Oscar's grind
   size:
     max: 1
+    multiplier: 2
     unit: 0.01
   skip_sfd_dist: 0.001
   volume_ewm:

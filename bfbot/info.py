@@ -74,14 +74,15 @@ def print_states(config, pair):
     print(dump_yaml({
         'balance': bF.getbalance(),
         'collateral': bF.getcollateral(),
-        'positions': bF.getpositions(product_code=fx_pair),
-        'childorders': [
-            d for d in bF.getchildorders(product_code=fx_pair)
-            if d.get('child_order_state') == 'ACTIVE'
-        ],
-        'parentorders': [
-            d for d in bF.getparentorders(product_code=fx_pair)
-            if d.get('parent_order_state') == 'ACTIVE'
-        ],
-        'tickers': {p: bF.ticker(product_code=p) for p in [pair, fx_pair]}
+        'orders': {
+            'childorders': [
+                d for d in bF.getchildorders(product_code=fx_pair)
+                if d.get('child_order_state') == 'ACTIVE'
+            ],
+            'parentorders': [
+                d for d in bF.getparentorders(product_code=fx_pair)
+                if d.get('parent_order_state') == 'ACTIVE'
+            ]
+        },
+        'positions': bF.getpositions(product_code=fx_pair)
     }))
