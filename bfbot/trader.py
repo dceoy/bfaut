@@ -73,8 +73,8 @@ class BfStreamTrader(SubscribeCallback):
             )
             self.vd_bollinger = (
                 np.array([- 1, 1]) *
-                self.trade['volume_ewm']['trigger_sigma'] +
-                np.sqrt(self.vd_ewm['var']) *
+                self.trade['volume_ewm']['trigger_sigma'] *
+                np.sqrt(self.vd_ewm['var']) +
                 self.vd_ewm['mean']
             )
             if self.n_to_load == 0:
@@ -208,8 +208,7 @@ class BfStreamTrader(SubscribeCallback):
                         self.last_open_size + self.trade['size']['unit'],
                         self.trade['size']['max']
                     ) if (
-                        self.last_open_size and
-                        self.last_collat and
+                        self.last_open_size and self.last_collat and
                         self.last_collat > collateral['collateral']
                     ) else self.trade['size']['unit']
                 )))
