@@ -3,14 +3,10 @@ bF:
   api_secret: ''
 trade:
   bet: "d'Alembert"   # Martingale | d'Alembert | Oscar's grind
-  order:
-    limit_spread: 0.00001
-    stop_loss: 0.001
-    take_profit: 0.001
   size:
     max: 1
     unit: 0.01
   skip_sfd_dist: 0.001
   volume_ewm:
     alpha: 0.01
-    trigger_sigma: 2
+    bolliger: 2

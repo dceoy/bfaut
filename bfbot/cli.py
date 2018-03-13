@@ -7,7 +7,7 @@ Usage:
     bfbot init [--debug] [--file=<yaml>]
     bfbot state [--debug] [--file=<yaml>] [--pair=<code>]
     bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>]
-               [--timeout=<sec>] [--ifdoco] [--quiet]
+               [--timeout=<sec>] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
 
@@ -19,7 +19,6 @@ Options:
     --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
     --timeout=<sec>     Set senconds for timeout [default: 3600]
-    --ifdoco            Use IFDOCO order for opening
     --quiet             Suppress messages
 
 Commands:
@@ -66,7 +65,6 @@ def main():
                 config=config,
                 pair=args['--pair'],
                 timeout=args['--timeout'],
-                ifdoco=args['--ifdoco'],
                 quiet=args['--quiet']
             )
         elif args['state']:
