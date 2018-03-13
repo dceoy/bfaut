@@ -170,6 +170,26 @@ class BfStreamTrader(SubscribeCallback):
         self.logger.info('order_targets: {}'.format(order_targets))
         return order_targets
 
+    def _calc_bet_size(self, won=True):
+        if self.trade['bet'] == 'Martingale':
+            bet_size = (
+                self.trade['size']['unit'] if won
+                else self.last_open_size * 2
+            )
+        elif self.trade['bet'] == "d'Alembert":
+            bet_size = (
+                self.trade['size']['unit'] if won
+                else self.last_open_size + self.trade['size']['unit']
+            )
+        elif self.trade['bet'] == "Oscar's grind":
+            bet_size = (
+                self.last_open_size + self.trade['size']['unit'] if won
+                else self.trade['size']['unit']
+            )
+        else:
+            bet_size = self.trade['size']['unit']
+        return min(bet_size, self.trade['size']['max'])
+
     def _trade(self):
         try:
             collateral, pos_side, pos_size, tickers = self._fetch_state()
@@ -204,13 +224,10 @@ class BfStreamTrader(SubscribeCallback):
                 else:
                     order_side = None
                 order_size = float(str(np.float16(
-                    min(
-                        self.last_open_size + self.trade['size']['unit'],
-                        self.trade['size']['max']
-                    ) if (
-                        self.last_open_size and self.last_collat and
-                        self.last_collat > collateral['collateral']
-                    ) else self.trade['size']['unit']
+                    self._calc_bet_size(
+                        won=(self.last_collat < collateral['collateral'])
+                    ) if self.last_open_size and self.last_collat
+                    else self.trade['size']['unit']
                 )))
                 order_targets = (
                     self._calc_order_targets(
