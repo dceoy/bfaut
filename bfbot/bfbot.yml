@@ -8,6 +8,5 @@ trade:
     multiplier: 2
     unit: 0.01
   skip_sfd_dist: 0.001
-  volume_ewm:
-    alpha: 0.01
-    bolliger: 2
+  volume_ewm_alpha: 0.01
+  sigma_trigger: [0.1, 0.5]

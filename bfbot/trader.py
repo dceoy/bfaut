@@ -20,15 +20,15 @@ class BfStreamTrader(SubscribeCallback):
         self.timeout_delta = timedelta(seconds=int(timeout))
         self.quiet = quiet
         self.n_to_load = 20
-        self.sfd_pins = np.array([0.1, 0.15, 0.2])
+        self.sfd_pins = np.array([0.05, 0.1, 0.15, 0.2])
         self.bF = pybitflyer.API(
             api_key=config['bF']['api_key'],
             api_secret=config['bF']['api_secret']
         )
         self.start_datetime = None
         self.vd_ewm = None
-        self.vd_bollinger = None
-        self.prefix_msg = None
+        self.bollinger = None
+        self.msg_prefix = '||||'
         self.reserved_side = None
         self.reserved_size = None
         self.order_datetime = None
@@ -43,9 +43,6 @@ class BfStreamTrader(SubscribeCallback):
         )[['side', 'size']].append(
             pd.DataFrame({'side': ['BUY', 'SELL'], 'size': [0, 0]})
         ).groupby('side')['size'].sum()
-        self.prefix_msg = '| BUY:{:8.3f} | SELL:{:8.3f} |'.format(
-            volumes['BUY'], volumes['SELL']
-        )
         volume_diff = volumes['BUY'] - volumes['SELL']
         if self.vd_ewm is None:
             self.vd_ewm = {
@@ -55,14 +52,12 @@ class BfStreamTrader(SubscribeCallback):
         else:
             self.vd_ewm = {
                 'mean': (
-                    self.trade['volume_ewm']['alpha'] * volume_diff +
-                    (1 - self.trade['volume_ewm']['alpha']) *
-                    self.vd_ewm['mean']
+                    self.trade['volume_ewm_alpha'] * volume_diff +
+                    (1 - self.trade['volume_ewm_alpha']) * self.vd_ewm['mean']
                 ),
                 'var': (
-                    (1 - self.trade['volume_ewm']['alpha']) * (
-                        self.vd_ewm['var'] +
-                        self.trade['volume_ewm']['alpha'] *
+                    (1 - self.trade['volume_ewm_alpha']) * (
+                        self.vd_ewm['var'] + self.trade['volume_ewm_alpha'] *
                         np.square(volume_diff - self.vd_ewm['mean'])
                     )
                 )
@@ -70,25 +65,47 @@ class BfStreamTrader(SubscribeCallback):
             self.logger.info(
                 'self.vd_ewm: {}'.format(self.vd_ewm)
             )
-            self.vd_bollinger = (
-                np.array([- 1, 1]) *
-                self.trade['volume_ewm']['bolliger'] *
-                np.sqrt(self.vd_ewm['var']) +
+            self.bollinger = np.sort(np.concatenate([
+                np.array([- m, m]) * np.sqrt(self.vd_ewm['var']) +
                 self.vd_ewm['mean']
+                for m in self.trade['sigma_trigger']
+            ]))
+            self.msg_prefix = (
+                '| BUY:' + (
+                    '{:8.3f}'.format(volumes['BUY'])
+                    if volumes['BUY'] else ' ' * 8
+                ) + ' | SELL:' + (
+                    '{:8.3f}'.format(volumes['SELL'])
+                    if volumes['SELL'] else ' ' * 8
+                ) + ' |\tEWM{}'.format(np.round(self.bollinger * 10) / 10)
             )
             if self.n_to_load == 0:
                 self._trade()
             else:
                 self.n_to_load -= 1
                 self.logger.info('self.n_to_load: {}'.format(self.n_to_load))
-                self._print('Wait for loading of executions...')
+                self._print('Wait for loading...')
 
-    def _print(self, message, prompt='>>'):
-        text = '{0}   {1}   {2}'.format(self.prefix_msg, prompt, message)
+    def _print(self, message):
+        text = '{0}\t> {1}'.format(self.msg_prefix, message)
         if self.quiet:
             self.logger.info(text)
         else:
             print(text, flush=True)
+
+    def _determine_order_side(self):
+        if self.bollinger[0] > 0:
+            order_side = 'BUY'
+        elif self.bollinger[- 1] < 0:
+            order_side = 'SELL'
+        elif self.bollinger[1] > 0:
+            order_side = 'SELL'
+        elif self.bollinger[- 2] < 0:
+            order_side = 'BUY'
+        else:
+            order_side = None
+        self.logger.info('order_side: {}'.format(order_side))
+        return order_side
 
     def _fetch_state(self):
         collateral = self.bF.getcollateral()
@@ -103,7 +120,7 @@ class BfStreamTrader(SubscribeCallback):
         if isinstance(positions, list):
             self.logger.info('positions: {}'.format(positions))
             pos_sizes = {
-                s: np.sum([p['size'] for p in positions if p['side'] == s])
+                s: sum([p['size'] for p in positions if p['side'] == s])
                 for s in ['SELL', 'BUY']
             }
             pos_size = max(pos_sizes.values())
@@ -192,61 +209,38 @@ class BfStreamTrader(SubscribeCallback):
                 )
             )
             penal_side, sfd_near_dist = self._calc_sfd_stat(tickers=tickers)
+            order_side = self._determine_order_side()
             order_is_open = (self.reserved_size < self.trade['size']['unit'])
+            if order_side is None:
+                order_size = 0
             if order_is_open:
-                if max(self.vd_bollinger) < 0:
-                    order_side = 'SELL'
-                elif min(self.vd_bollinger) > 0:
-                    order_side = 'BUY'
-                else:
-                    order_side = None
-                order_size = float(str(np.float16(
+                order_size = (
                     self._calc_bet_size(won=(self.last_collat < collat)) if (
                         self.last_open_size and self.last_collat and
                         not self.oversized_alert
                     ) else self.trade['size']['unit']
-                )))
+                )
             else:
-                if self.reserved_side == 'BUY' and self.vd_ewm['mean'] < 0:
-                    order_side = 'SELL'
-                elif self.reserved_side == 'SELL' and self.vd_ewm['mean'] > 0:
-                    order_side = 'BUY'
-                else:
-                    order_side = None
-                order_size = float(str(np.float16(self.reserved_size)))
-            reverse_order_side = (
-                {'BUY': 'SELL', 'SELL': 'BUY'}[order_side]
-                if order_side else None
-            )
+                order_size = self.reserved_size
             self.oversized_alert = False
 
         if abs(self.reserved_size - pos_size) >= 0.001:
             self._print(
-                'Skip by queued execution. (side: {0}, size: {1})'.format(
+                'Skip by queue. (side: {0}, size: {1})'.format(
                     self.reserved_side, self.reserved_size
                 )
             )
         elif order_side is None:
-            if order_is_open:
-                self._print(
-                    'Skip by volume balance. (EWM diff bollinger band: '
-                    '[{0:.3f}, {1:.3f}])'.format(
-                        self.vd_bollinger[0], self.vd_bollinger[1]
-                    )
-                )
-            else:
-                self._print(
-                    'Skip by volume balance. (EWM diff: {:.3f})'.format(
-                        self.vd_ewm['mean']
-                    )
-                )
-        elif order_side == penal_side:
+            self._print('Skip by volume difference.')
+        elif order_side == self.reserved_side:
             self._print(
-                'Skip by sfd penalty. (penalized side: {})'.format(penal_side)
+                'Skip by position. (side: {})'.format(self.reserved_side)
             )
+        elif order_side == penal_side:
+            self._print('Skip by sfd penalty. (side: {})'.format(penal_side))
         elif sfd_near_dist < self.trade['skip_sfd_dist']:
             self._print(
-                'Skip by sfd boundary. (distance: {:.6f})'.format(
+                'Skip by sfd boundary. (distance: {:.4f})'.format(
                     sfd_near_dist
                 )
             )
@@ -271,7 +265,7 @@ class BfStreamTrader(SubscribeCallback):
                 )
                 if order_is_accepted:
                     self._print(
-                        'Accepted: {0} {1} {2} with MARKET.'.format(
+                        '{0} {1} {2}. => Accepted.'.format(
                             order_side, order_size, self.fx_pair
                         )
                     )
@@ -288,10 +282,12 @@ class BfStreamTrader(SubscribeCallback):
                         elif self.reserved_size <= - 0.001:
                             self.reserved_side = order_side
                         else:
-                            self.reserved_side = reverse_order_side
+                            self.reserved_side = {
+                                'BUY': 'SELL', 'SELL': 'BUY'
+                            }[order_side]
                 else:
                     self._print(
-                        'Rejected: {0} {1} {2} with MARKET.'.format(
+                        '{0} {1} {2}. => Rejected.'.format(
                             order_side, order_size, self.fx_pair
                         )
                     )
