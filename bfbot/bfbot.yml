@@ -5,7 +5,6 @@ trade:
   bet: 'Martingale'   # Martingale | d'Alembert | Oscar's grind
   size:
     max: 1
-    multiplier: 2
     unit: 0.01
   skip_sfd_dist: 0.001
   volume_ewm_alpha: 0.01

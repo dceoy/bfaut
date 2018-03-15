@@ -34,7 +34,7 @@ class BfStreamTrader(SubscribeCallback):
         self.order_datetime = None
         self.last_open_size = None
         self.last_collat = None
-        self.oversized_alert = False
+        self.n_oversize = 0
         self.logger = logging.getLogger(__name__)
 
     def message(self, pubnub, message):
@@ -77,7 +77,9 @@ class BfStreamTrader(SubscribeCallback):
                 ) + ' | SELL:' + (
                     '{:8.3f}'.format(volumes['SELL'])
                     if volumes['SELL'] else ' ' * 8
-                ) + ' |\tEWM{}'.format(np.round(self.bollinger * 10) / 10)
+                ) + ' | EWM:{:>25} |'.format(
+                    str(np.round(self.bollinger * 10) / 10)
+                )
             )
             if self.n_to_load == 0:
                 self._trade()
@@ -94,13 +96,14 @@ class BfStreamTrader(SubscribeCallback):
             print(text, flush=True)
 
     def _determine_order_side(self):
+        is_double = len(self.bollinger) > 2
         if self.bollinger[0] > 0:
             order_side = 'BUY'
         elif self.bollinger[- 1] < 0:
             order_side = 'SELL'
-        elif self.bollinger[1] > 0:
+        elif is_double and self.bollinger[1] > 0:
             order_side = 'SELL'
-        elif self.bollinger[- 2] < 0:
+        elif is_double and self.bollinger[- 2] < 0:
             order_side = 'BUY'
         else:
             order_side = None
@@ -161,28 +164,37 @@ class BfStreamTrader(SubscribeCallback):
         ))
         return penal_side, sfd_near_dist
 
-    def _calc_bet_size(self, won=True):
-        if self.trade['bet'] == 'Martingale':
-            bet_size = (
-                self.trade['size']['unit'] if won else round(
-                    self.last_open_size * (
-                        self.trade['size'].get('multiplier') or 2
-                    ) * 1000
-                ) / 1000
-            )
-        elif self.trade['bet'] == "d'Alembert":
-            bet_size = (
-                self.trade['size']['unit'] if won
-                else self.last_open_size + self.trade['size']['unit']
-            )
-        elif self.trade['bet'] == "Oscar's grind":
-            bet_size = (
-                self.last_open_size + self.trade['size']['unit'] if won
-                else self.trade['size']['unit']
-            )
+    def _calc_order_size(self, order_is_open, collat):
+        if not order_is_open:
+            order_size = self.reserved_size
+        elif self.n_oversize == 1:
+            order_size = self.last_open_size
+        elif self.n_oversize == 0 and self.last_open_size and self.last_collat:
+            won = (self.last_collat < collat)
+            if self.trade['bet'] == 'Martingale':
+                bet_size = (
+                    self.trade['size']['unit'] if won
+                    else self.last_open_size * 2
+                )
+            elif self.trade['bet'] == "d'Alembert":
+                bet_size = (
+                    self.trade['size']['unit'] if won
+                    else self.last_open_size + self.trade['size']['unit']
+                )
+            elif self.trade['bet'] == "Oscar's grind":
+                bet_size = (
+                    self.last_open_size + self.trade['size']['unit'] if won
+                    else self.trade['size']['unit']
+                )
+            else:
+                bet_size = self.trade['size']['unit']
+            order_size = round(
+                min(bet_size, self.trade['size'].get('max') or bet_size) * 1000
+            ) / 1000
         else:
-            bet_size = self.trade['size']['unit']
-        return min(bet_size, self.trade['size'].get('max') or bet_size)
+            order_size = self.trade['size']['unit']
+        self.logger.info('order_size: {}'.format(order_size))
+        return order_size
 
     def _trade(self):
         try:
@@ -211,18 +223,9 @@ class BfStreamTrader(SubscribeCallback):
             penal_side, sfd_near_dist = self._calc_sfd_stat(tickers=tickers)
             order_side = self._determine_order_side()
             order_is_open = (self.reserved_size < self.trade['size']['unit'])
-            if order_side is None:
-                order_size = 0
-            if order_is_open:
-                order_size = (
-                    self._calc_bet_size(won=(self.last_collat < collat)) if (
-                        self.last_open_size and self.last_collat and
-                        not self.oversized_alert
-                    ) else self.trade['size']['unit']
-                )
-            else:
-                order_size = self.reserved_size
-            self.oversized_alert = False
+            order_size = self._calc_order_size(
+                order_is_open=order_is_open, collat=collat
+            )
 
         if abs(self.reserved_size - pos_size) >= 0.001:
             self._print(
@@ -285,14 +288,16 @@ class BfStreamTrader(SubscribeCallback):
                             self.reserved_side = {
                                 'BUY': 'SELL', 'SELL': 'BUY'
                             }[order_side]
+                    self.n_oversize = 0
                 else:
                     self._print(
                         '{0} {1} {2}. => Rejected.'.format(
                             order_side, order_size, self.fx_pair
                         )
                     )
-                    if order.get('status') == - 205:
-                        self.oversized_alert = True
+                    self.n_oversize += int(
+                        'status' in order and order['status'] == - 205
+                    )
                     self.logger.warning(os.linesep + dump_yaml(order))
 
 
