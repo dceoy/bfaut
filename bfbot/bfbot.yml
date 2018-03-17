@@ -6,6 +6,5 @@ trade:
   size:
     max: 1
     unit: 0.01
-  skip_sfd_dist: 0.001
-  volume_ewm_alpha: 0.01
-  sigma_trigger: [0.1, 0.5]
+  ewm_alpha: 0.01
+  sigma_trigger: 0.1
