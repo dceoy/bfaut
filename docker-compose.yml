@@ -1,14 +1,14 @@
 version: '3'
 
 services:
-  bfbot:
-    container_name: bfbot
+  bfaut:
+    container_name: bfaut
     build:
       context: .
-    image: dceoy/bfbot:latest
+    image: dceoy/bfaut:latest
     restart: always
     environment:
-      BFBOT_YML: /host/bfbot.yml
+      BFAUT_YML: /host/bfaut.yml
     volumes:
       - ${HOME}:/host
     working_dir: /host

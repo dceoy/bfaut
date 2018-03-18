@@ -4,7 +4,7 @@ box:
 test:
   steps:
     - script:
-        name: Install bfbot
+        name: Install bfaut
         code: |
           pip install -U .
     - script:
@@ -15,12 +15,12 @@ test:
     - script:
         name: Test base options
         code: |
-          bfbot --version
-          bfbot --help
+          bfaut --version
+          bfaut --help
     - script:
         name: Test commands
         code: |
-          bfbot init --debug
+          bfaut init --debug
   after-steps:
     - slack-notifier:
         url: $SLACK_URL

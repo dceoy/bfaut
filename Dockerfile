@@ -1,6 +1,6 @@
-FROM python
+FROM python:latest
 
-ADD . /tmp/bfbot
+ADD . /tmp/bfaut
 
 RUN set -e \
       && ln -sf /bin/bash /bin/sh
@@ -12,7 +12,7 @@ RUN set -e \
       && apt-get clean
 
 RUN set -e \
-      && pip install -U --no-cache-dir pip /tmp/bfbot \
+      && pip install -U --no-cache-dir pip /tmp/bfaut \
       && rm -rf /tmp/*
 
-ENTRYPOINT ["bfbot"]
+ENTRYPOINT ["bfaut"]

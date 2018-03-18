@@ -1,22 +1,22 @@
 #!/usr/bin/env python
 """
-bF bot trader
+Bot trader for bF
 
 Usage:
-    bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
-    bfbot init [--debug] [--file=<yaml>]
-    bfbot state [--debug] [--file=<yaml>] [--pair=<code>]
-    bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--pivot]
+    bfaut stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
+    bfaut init [--debug] [--file=<yaml>]
+    bfaut state [--debug] [--file=<yaml>] [--pair=<code>]
+    bfaut auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--pivot]
                [--timeout=<sec>] [--quiet]
-    bfbot -h|--help
-    bfbot -v|--version
+    bfaut -h|--help
+    bfaut -v|--version
 
 Options:
     -h, --help          Print help and exit
     -v, --version       Print version and exit
     --debug             Execute a command with debug messages
     --sqlite=<path>     Save data in an SQLite3 database
-    --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
+    --file=<yaml>       Set a path to a YAML for configurations [$BFAUT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
     --pivot             Enable automatic trading pivot
     --timeout=<sec>     Set senconds for timeout [default: 3600]
@@ -42,7 +42,7 @@ from .util import set_config_yml, write_config_yml, read_yaml
 
 
 def main():
-    args = docopt(__doc__, version='bfbot {}'.format(__version__))
+    args = docopt(__doc__, version='bfaut {}'.format(__version__))
     set_log_config(args)
     logging.debug('args:{0}{1}'.format(os.linesep, args))
     config_yml = set_config_yml(path=args['--file'])

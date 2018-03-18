@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 
 from setuptools import setup, find_packages
-from bfbot import __version__
+from bfaut import __version__
 
 
 setup(
-    name='bfbot',
+    name='bfaut',
     version=__version__,
-    description='bfbot',
+    description='Bot trader for bF',
     packages=find_packages(),
-    url='https://github.com/dceoy/bfbot',
+    url='https://github.com/dceoy/bfaut',
     include_package_data=True,
     install_requires=[
         'docopt',
@@ -21,6 +21,6 @@ setup(
         'tornado'
     ],
     entry_points={
-        'console_scripts': ['bfbot=bfbot.cli:main'],
+        'console_scripts': ['bfaut=bfaut.cli:main'],
     }
 )

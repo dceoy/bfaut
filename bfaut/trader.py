@@ -9,7 +9,7 @@ import pandas as pd
 from pubnub.callbacks import SubscribeCallback
 import pybitflyer
 from .info import BfAsyncSubscriber
-from .util import BfbotError, dump_yaml
+from .util import BfautError, dump_yaml
 
 
 class BfStreamTrader(SubscribeCallback):
@@ -92,12 +92,12 @@ class BfStreamTrader(SubscribeCallback):
             position = {'side': pos_side, 'size': pos_size}
             self.logger.info('position: {}'.format(position))
         else:
-            raise BfbotError(positions)
+            raise BfautError(positions)
 
         ticks = {k: self.bF.ticker(product_code=v) for k, v in pc.items()}
         for t in ticks.values():
             if not isinstance(t, dict):
-                raise BfbotError(t)
+                raise BfautError(t)
         self.logger.debug(ticks)
         prices = {
             k: (v['best_bid'] + v['best_ask']) / 2 for k, v in ticks.items()
