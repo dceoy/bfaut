@@ -13,7 +13,7 @@ from .util import BfbotError, dump_yaml
 
 
 class BfStreamTrader(SubscribeCallback):
-    def __init__(self, pair, config, timeout, quiet=False):
+    def __init__(self, config, pair, pivot, timeout, quiet=False):
         self.logger = logging.getLogger(__name__)
         self.bF = pybitflyer.API(
             api_key=config['bF']['api_key'],
@@ -21,6 +21,7 @@ class BfStreamTrader(SubscribeCallback):
         )
         self.trade = config['trade']
         self.pair = pair
+        self.pivot = pivot
         self.timeout_delta = timedelta(seconds=int(timeout))
         self.quiet = quiet
         self.sfd_pins = np.array([0.05, 0.1, 0.15, 0.2])
@@ -298,17 +299,18 @@ class BfStreamTrader(SubscribeCallback):
                         self.reserved_size += order_size
                         self.reserved_side = order_side
                     else:
-                        self.ewm_lrr = self._compute_ewm_log_return_rate()
-                        pivot_signal = (
-                            0 > (
-                                np.random.normal(
-                                    loc=self.ewm_lrr['mean'],
-                                    scale=np.sqrt(self.ewm_lrr['var'])
-                                ) * {'BUY': - 1, 'SELL': 1}[order_side]
+                        if self.pivot:
+                            self.ewm_lrr = self._compute_ewm_log_return_rate()
+                            pivot_signal = (
+                                0 > (
+                                    np.random.normal(
+                                        loc=self.ewm_lrr['mean'],
+                                        scale=np.sqrt(self.ewm_lrr['var'])
+                                    ) * {'BUY': - 1, 'SELL': 1}[order_side]
+                                )
                             )
-                        )
-                        if pivot_signal:
-                            self.contrary = (not self.contrary)
+                            if pivot_signal:
+                                self.contrary = (not self.contrary)
                         self.reserved_size -= order_size
                         if abs(self.reserved_size) < 0.001:
                             self.reserved_side = None
@@ -326,14 +328,13 @@ class BfStreamTrader(SubscribeCallback):
                     self.logger.warning(os.linesep + dump_yaml(order))
 
 
-def open_deal(config, pair, timeout=3600, quiet=False):
+def open_deal(config, pair, pivot=True, timeout=3600, quiet=False):
     bas = BfAsyncSubscriber(
         channels=['lightning_executions_FX_{}'.format(pair)]
     )
     bas.pubnub.add_listener(
         BfStreamTrader(
-            config=config, pair=pair, timeout=timeout,
-            quiet=quiet
+            config=config, pair=pair, pivot=pivot, timeout=timeout, quiet=quiet
         )
     )
     bas.subscribe()

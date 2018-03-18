@@ -6,7 +6,7 @@ Usage:
     bfbot stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
     bfbot init [--debug] [--file=<yaml>]
     bfbot state [--debug] [--file=<yaml>] [--pair=<code>]
-    bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>]
+    bfbot auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--pivot]
                [--timeout=<sec>] [--quiet]
     bfbot -h|--help
     bfbot -v|--version
@@ -18,6 +18,7 @@ Options:
     --sqlite=<path>     Save data in an SQLite3 database
     --file=<yaml>       Set a path to a YAML for configurations [$BFBOT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
+    --pivot             Enable automatic trading pivot
     --timeout=<sec>     Set senconds for timeout [default: 3600]
     --quiet             Suppress messages
 
@@ -64,6 +65,7 @@ def main():
             open_deal(
                 config=config,
                 pair=args['--pair'],
+                pivot=args['--pivot'],
                 timeout=args['--timeout'],
                 quiet=args['--quiet']
             )
