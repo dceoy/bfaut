@@ -26,16 +26,16 @@ class BfStreamTrader(SubscribeCallback):
         self.quiet = quiet
         self.sfd_pins = np.array([0.05, 0.1, 0.15, 0.2])
         self.open = True                                        # mutable
+        self.won = False                                        # mutable
         self.contrary = False                                   # mutable
         self.n_load = 100                                       # mutable
         self.ewm_vd = {'mean': 0, 'var': 1}                     # mutable
         self.ewm_lrr = {'mean': 0, 'var': 1}                    # mutable
-        self.stat = None                                        # mutable
-        self.volumes = None                                     # mutable
-        self.reserved_side = None                               # mutable
-        self.reserved_size = None                               # mutable
+        self.stat = {}                                          # mutable
+        self.volumes = pd.DataFrame()                           # mutable
+        self.reserved = {}                                      # mutable
         self.order_datetime = None                              # mutable
-        self.last_open = None                                   # mutable
+        self.last_open = {}                                     # mutable
         self.n_size_over = 0                                    # mutable
         self.logger.debug(vars(self))
 
@@ -77,14 +77,6 @@ class BfStreamTrader(SubscribeCallback):
     def _fetch_states(self):
         pc = {'fx': ('FX_' + self.pair), 'origin': self.pair}
 
-        collateral = self.bF.getcollateral()
-        if isinstance(collateral, dict) and 'collateral' in collateral:
-            self.logger.debug(collateral)
-            collat = collateral['collateral']
-            self.logger.info('collat: {}'.format(collat))
-        else:
-            raise BfbotError(collateral)
-
         positions = self.bF.getpositions(product_code=pc['fx'])
         if isinstance(positions, list):
             self.logger.info('positions: {}'.format(positions))
@@ -97,9 +89,8 @@ class BfStreamTrader(SubscribeCallback):
                 [k for k, v in pos_sizes.items() if v == pos_size][0]
                 if pos_size > 0 else None
             )
-            self.logger.info(
-                'pos_side: {0}, pos_size: {1}'.format(pos_side, pos_size)
-            )
+            position = {'side': pos_side, 'size': pos_size}
+            self.logger.info('position: {}'.format(position))
         else:
             raise BfbotError(positions)
 
@@ -121,8 +112,8 @@ class BfStreamTrader(SubscribeCallback):
         self.logger.info('sfd_penalized: {}'.format(sfd_penalized))
 
         return {
-            'collat': collat, 'pos_side': pos_side, 'pos_size': pos_size,
-            'price': prices['fx'], 'sfd_penalized': sfd_penalized
+            'position': position, 'price': prices['fx'],
+            'sfd_penalized': sfd_penalized
         }
 
     def _compute_ewm_volume_delta(self):
@@ -190,70 +181,81 @@ class BfStreamTrader(SubscribeCallback):
 
     def _compute_order_size(self):
         if not self.open:
-            order_size = self.reserved_size
-        elif self.n_size_over == 1:
-            order_size = self.last_open['size']
+            bet_size = self.reserved['size']
+        elif self.n_size_over == 1 and self.last_open:
+            bet_size = self.last_open['size']
         elif self.n_size_over == 0 and self.last_open:
-            won = (self.last_open['collat'] < self.stat['collat'])
             if self.trade['bet'] == 'Martingale':
                 bet_size = (
-                    self.trade['size']['unit'] if won
+                    self.trade['size']['unit'] if self.won
                     else self.last_open['size'] * 2
                 )
             elif self.trade['bet'] == "d'Alembert":
                 bet_size = (
-                    self.trade['size']['unit'] if won
+                    self.trade['size']['unit'] if self.won
                     else self.last_open['size'] + self.trade['size']['unit']
                 )
             elif self.trade['bet'] == "Oscar's grind":
                 bet_size = (
-                    self.last_open['size'] + self.trade['size']['unit'] if won
-                    else self.trade['size']['unit']
+                    self.last_open['size'] + self.trade['size']['unit']
+                    if self.won else self.trade['size']['unit']
+                )
+            elif self.trade['bet'] == 'Pyramid':
+                bet_size = (
+                    self.last_open['size'] + self.trade['size']['unit'] *
+                    (- 1 if self.won else 1)
                 )
             else:
                 bet_size = self.trade['size']['unit']
-            order_size = round(
-                min(bet_size, self.trade['size'].get('max') or bet_size) * 1000
-            ) / 1000
         else:
-            order_size = self.trade['size']['unit']
-        self.logger.info('order_size: {}'.format(order_size))
+            bet_size = (
+                (self.trade['size'].get('init') or self.trade['size']['unit'])
+                if self.trade['bet'] == 'Pyramid' else
+                self.trade['size']['unit']
+            )
+        order_size = round(
+            (
+                min(bet_size, self.trade['size']['max'])
+                if self.open and 'max' in self.trade['size'] else
+                bet_size
+            ) * 1000
+        ) / 1000
+        self.logger.info(
+            'bet_size: {0}, order_size: {1}'.format(bet_size, order_size)
+        )
         return order_size
 
     def _trade(self):
+        queue_is_left = (
+            abs(self.reserved['size'] - self.stat['position']['size']) >= 0.001
+            if self.reserved else False
+        )
         if (
-                self.reserved_size is not None and
-                self.order_datetime and
-                abs(self.reserved_size - self.stat['pos_size']) >= 0.001 and
+                self.order_datetime and queue_is_left and
                 datetime.now() - self.order_datetime < self.timeout_delta
         ):
             self.logger.info('Wait for execution.')
         else:
             self.logger.info('Calibrate reserved size.')
-            self.reserved_size = self.stat['pos_size']
-            self.reserved_side = self.stat['pos_side']
+            self.reserved = self.stat['position']
             self.order_datetime = None
-        self.logger.info(
-            'self.reserved_side: {0}, self.reserved_size: {1}'.format(
-                self.reserved_side, self.reserved_size
-            )
-        )
-        self.open = (self.reserved_size < self.trade['size']['unit'])
+        self.logger.info('self.reserved: {}'.format(self.reserved))
+        self.open = (self.reserved['size'] < self.trade['size']['unit'])
         order_side = self._determine_order_side()
         order_size = self._compute_order_size()
 
-        if abs(self.reserved_size - self.stat['pos_size']) >= 0.001:
+        if queue_is_left:
             self._print(
                 'Skip by queue. (side: {0}, size: {1})'.format(
-                    self.reserved_side, self.reserved_size
+                    self.reserved['side'], self.reserved['size']
                 )
             )
         elif order_side is None:
             self._print('Skip by volume difference.')
-        elif order_side == self.reserved_side:
+        elif order_side == self.reserved['side']:
             self._print(
                 'Skip by position. (side: {0}, size: {1})'.format(
-                    self.reserved_side, self.reserved_size
+                    self.reserved['side'], self.reserved['size']
                 )
             )
         elif order_side == self.stat['sfd_penalized']:
@@ -291,14 +293,37 @@ class BfStreamTrader(SubscribeCallback):
                     self.order_datetime = datetime.now()
                     if self.open:
                         self.last_open = {
-                            'side': order_side,
-                            'size': order_size,
-                            'price': self.stat['price'],
-                            'collat': self.stat['collat']
+                            'side': order_side, 'size': order_size,
+                            'price': self.stat['price']
                         }
-                        self.reserved_size += order_size
-                        self.reserved_side = order_side
+                        self.reserved = {
+                            'side': order_side,
+                            'size': self.reserved['size'] + order_size
+                        }
                     else:
+                        updated_size = self.reserved['size'] - order_size
+                        if abs(updated_size) < 0.001:
+                            self.reserved = {
+                                'side': None, 'size': updated_size
+                            }
+                        elif updated_size >= 0.001:
+                            self.reserved = {
+                                'side': order_side, 'size': updated_size
+                            }
+                        else:
+                            self.reserved = {
+                                'side':
+                                {'BUY': 'SELL', 'SELL': 'BUY'}[order_side],
+                                'size': abs(updated_size)
+                            }
+                        if self.last_open.get('side') == 'BUY':
+                            self.won = (
+                                self.stat['price'] > self.last_open['price']
+                            )
+                        elif self.last_open.get('side') == 'SELL':
+                            self.won = (
+                                self.stat['price'] < self.last_open['price']
+                            )
                         if self.pivot:
                             self.ewm_lrr = self._compute_ewm_log_return_rate()
                             pivot_signal = (
@@ -311,15 +336,6 @@ class BfStreamTrader(SubscribeCallback):
                             )
                             if pivot_signal:
                                 self.contrary = (not self.contrary)
-                        self.reserved_size -= order_size
-                        if abs(self.reserved_size) < 0.001:
-                            self.reserved_side = None
-                        elif self.reserved_size <= - 0.001:
-                            self.reserved_side = order_side
-                        else:
-                            self.reserved_side = {
-                                'BUY': 'SELL', 'SELL': 'BUY'
-                            }[order_side]
                     self.n_size_over = 0
                 else:
                     self.n_size_over += int(
