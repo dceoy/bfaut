@@ -1,7 +1,9 @@
 bfaut
 =====
 
-Bot trader for bF
+Autonomous trader for bF
+
+[![wercker status](https://app.wercker.com/status/024c56acaeb561b9b37f93f0fe284c56/s/master "wercker status")](https://app.wercker.com/project/byKey/024c56acaeb561b9b37f93f0fe284c56)
 
 Installation
 ------------
@@ -15,7 +17,7 @@ Usage
 
 ```sh
 $ bfaut --help
-Bot trader for bF
+Autonomous trader for bF
 
 Usage:
     bfaut stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]

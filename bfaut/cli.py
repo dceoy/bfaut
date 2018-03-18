@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Bot trader for bF
+Autonomous trader for bF
 
 Usage:
     bfaut stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]

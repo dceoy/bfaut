@@ -356,5 +356,5 @@ def open_deal(config, pair, pivot=True, timeout=3600, quiet=False):
     bas.subscribe()
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     if not quiet:
-        print('>>  !!! OPEN DEAL !!!')
+        print('!!! OPEN DEAL !!!')
     bas.pubnub.start()
