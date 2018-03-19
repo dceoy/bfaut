@@ -22,8 +22,8 @@ Autonomous trader for bF
 Usage:
     bfaut stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
     bfaut init [--debug] [--file=<yaml>]
-    bfaut state [--debug] [--file=<yaml>] [--pair=<code>]
-    bfaut auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--pivot]
+    bfaut state [--debug] [--file=<yaml>] [--pair=<code>] [<item>...]
+    bfaut auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--contrary]
                [--timeout=<sec>] [--quiet]
     bfaut -h|--help
     bfaut -v|--version
@@ -35,7 +35,7 @@ Options:
     --sqlite=<path>     Save data in an SQLite3 database
     --file=<yaml>       Set a path to a YAML for configurations [$BFAUT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
-    --pivot             Enable automatic trading pivot
+    --contrary          Trade with contrary mode
     --timeout=<sec>     Set senconds for timeout [default: 3600]
     --quiet             Suppress messages
 
@@ -47,4 +47,5 @@ Commands:
 
 Arguments:
     <channel>...        PubNub channels [default: lightning_ticker_BTC_JPY]
+    <item>...           State types { balance, collateral, orders, positions }
 ```

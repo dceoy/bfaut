@@ -65,16 +65,17 @@ def stream_rate(channels, sqlite_path=None, quiet=False):
     bas.pubnub.start()
 
 
-def print_states(config, pair):
+def print_states(config, pair, items):
     bF = pybitflyer.API(
         api_key=config['bF']['api_key'],
         api_secret=config['bF']['api_secret']
     )
     fx_pair = 'FX_' + pair
-    print(dump_yaml({
-        'balance': bF.getbalance(),
-        'collateral': bF.getcollateral(),
-        'orders': {
+    keys = items or ['balance', 'collateral', 'orders', 'positions']
+    d = {
+        'balance': 'balance' in keys and bF.getbalance(),
+        'collateral': 'collateral' in keys and bF.getcollateral(),
+        'orders': 'orders' in keys and {
             'childorders': [
                 d for d in bF.getchildorders(product_code=fx_pair)
                 if d.get('child_order_state') == 'ACTIVE'
@@ -84,5 +85,7 @@ def print_states(config, pair):
                 if d.get('parent_order_state') == 'ACTIVE'
             ]
         },
-        'positions': bF.getpositions(product_code=fx_pair)
-    }))
+        'positions':
+        'positions' in keys and bF.getpositions(product_code=fx_pair)
+    }
+    print(dump_yaml({k: v for k, v in d.items() if v}))

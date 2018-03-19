@@ -2,10 +2,10 @@ bF:
   api_key: ''
   api_secret: ''
 trade:
-  bet: 'Martingale'     # Martingale | d'Alembert | Oscar's grind | Pyramid
+  bet: 'Martingale'     # Martingale | d'Alembert
+  mode: 'pivot'         # pivot | positive | negative
   size:
     unit: 0.01
-    init: 0.01          # required only in `Pyramid`
     max: 1              # optional
     multiplier: 2       # optional
   ewm_alpha: 0.01

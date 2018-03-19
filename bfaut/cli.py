@@ -5,8 +5,8 @@ Autonomous trader for bF
 Usage:
     bfaut stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
     bfaut init [--debug] [--file=<yaml>]
-    bfaut state [--debug] [--file=<yaml>] [--pair=<code>]
-    bfaut auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--pivot]
+    bfaut state [--debug] [--file=<yaml>] [--pair=<code>] [<item>...]
+    bfaut auto [--debug|--info] [--file=<yaml>] [--pair=<code>]
                [--timeout=<sec>] [--quiet]
     bfaut -h|--help
     bfaut -v|--version
@@ -18,7 +18,6 @@ Options:
     --sqlite=<path>     Save data in an SQLite3 database
     --file=<yaml>       Set a path to a YAML for configurations [$BFAUT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
-    --pivot             Enable automatic trading pivot
     --timeout=<sec>     Set senconds for timeout [default: 3600]
     --quiet             Suppress messages
 
@@ -30,6 +29,7 @@ Commands:
 
 Arguments:
     <channel>...        PubNub channels [default: lightning_ticker_BTC_JPY]
+    <item>...           State types { balance, collateral, orders, positions }
 """
 
 import logging
@@ -65,13 +65,16 @@ def main():
             open_deal(
                 config=config,
                 pair=args['--pair'],
-                pivot=args['--pivot'],
                 timeout=args['--timeout'],
                 quiet=args['--quiet']
             )
         elif args['state']:
             logging.debug('Print states')
-            print_states(config=config, pair=args['--pair'])
+            print_states(
+                config=config,
+                pair=args['--pair'],
+                items=args['<item>']
+            )
 
 
 def set_log_config(args):
