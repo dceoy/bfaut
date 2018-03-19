@@ -31,11 +31,13 @@ class BfStreamTrader(SubscribeCallback):
         self.n_load = 100                                       # mutable
         self.ewm_vd = {'mean': 0, 'var': 1}                     # mutable
         self.ewm_lrr = {'mean': 0, 'var': 1}                    # mutable
+        self.collat = None                                      # mutable
         self.stat = {}                                          # mutable
         self.volumes = pd.DataFrame()                           # mutable
         self.reserved = {}                                      # mutable
         self.order_datetime = None                              # mutable
         self.last_open = {}                                     # mutable
+        self.anchored_collat = None                             # mutable
         self.n_size_over = 0                                    # mutable
         self.logger.debug(vars(self))
 
@@ -46,33 +48,49 @@ class BfStreamTrader(SubscribeCallback):
             pd.DataFrame({'side': ['BUY', 'SELL'], 'size': [0, 0]})
         ).groupby('side')['size'].sum()
         self.ewm_vd = self._compute_ewm_volume_delta()
-        if self.n_load <= 0:
-            try:
-                self.stat = self._fetch_states()
-            except Exception as e:
-                self.logger.error(e)
-            else:
-                self.logger.debug(self.stat)
-                self._trade()
+        try:
+            self.collat = self._fetch_collat()
+        except Exception as e:
+            self.logger.error(e)
         else:
-            self.n_load -= 1
-            self._print('Wait for loading. (left: {})'.format(self.n_load))
+            if self.n_load <= 0:
+                try:
+                    self.stat = self._fetch_states()
+                except Exception as e:
+                    self.logger.error(e)
+                else:
+                    self.logger.debug(self.stat)
+                    self._trade()
+            else:
+                self.n_load -= 1
+                self._print('Wait for loading. (left: {})'.format(self.n_load))
 
     def _print(self, message):
-        text = '| BUY:{0} | SELL:{1} | EWMA:{2:8.3f} |\t> {3}'.format(
+        text = (
+            '| BUY:{0} | SELL:{1} | EWMA:{2:8.3f} | COLLAT:  {3} |\t> {4}'
+        ).format(
             *[
                 (
                     '{:8.3f}'.format(self.volumes[s]) if self.volumes[s]
                     else ' ' * 8
                 ) for s in ['BUY', 'SELL']
             ],
-            self.ewm_vd['mean'],
-            message
+            self.ewm_vd['mean'], int(self.collat), message
         )
         if self.quiet:
             self.logger.info(text)
         else:
             print(text, flush=True)
+
+    def _fetch_collat(self):
+        collateral = self.bF.getcollateral()
+        if isinstance(collateral, dict) and 'collateral' in collateral:
+            self.logger.debug(collateral)
+            collat = collateral['collateral']
+            self.logger.info('collat: {}'.format(collat))
+        else:
+            raise BfautError(collateral)
+        return collat
 
     def _fetch_states(self):
         pc = {'fx': ('FX_' + self.pair), 'origin': self.pair}
@@ -158,7 +176,8 @@ class BfStreamTrader(SubscribeCallback):
     def _determine_order_side(self):
         bollinger_band = (
             self.ewm_vd['mean'] + np.array([- 1, 1]) *
-            np.sqrt(self.ewm_vd['var']) * self.trade['sigma_trigger']
+            np.sqrt(self.ewm_vd['var']) *
+            (self.trade.get('sigma_trigger') or 0)
         )
         if self.open:
             if min(bollinger_band) > 0:
@@ -240,6 +259,10 @@ class BfStreamTrader(SubscribeCallback):
             self.reserved = self.stat['position']
             self.order_datetime = None
         self.logger.info('self.reserved: {}'.format(self.reserved))
+        if self.anchored_collat:
+            self.won = (self.collat >= self.anchored_collat)
+            if self.won and self.reserved['size'] == 0 and not queue_is_left:
+                self.anchored_collat = None
         self.open = (self.reserved['size'] < self.trade['size']['unit'])
         order_side = self._determine_order_side()
         order_size = self._compute_order_size()
@@ -300,6 +323,8 @@ class BfStreamTrader(SubscribeCallback):
                             'side': order_side,
                             'size': self.reserved['size'] + order_size
                         }
+                        if self.anchored_collat is None:
+                            self.anchored_collat = self.collat
                     else:
                         updated_size = self.reserved['size'] - order_size
                         if abs(updated_size) < 0.001:
@@ -316,14 +341,6 @@ class BfStreamTrader(SubscribeCallback):
                                 {'BUY': 'SELL', 'SELL': 'BUY'}[order_side],
                                 'size': abs(updated_size)
                             }
-                        if self.last_open.get('side') == 'BUY':
-                            self.won = (
-                                self.stat['price'] > self.last_open['price']
-                            )
-                        elif self.last_open.get('side') == 'SELL':
-                            self.won = (
-                                self.stat['price'] < self.last_open['price']
-                            )
                         if self.pivot:
                             self.ewm_lrr = self._compute_ewm_log_return_rate()
                             pivot_signal = (
