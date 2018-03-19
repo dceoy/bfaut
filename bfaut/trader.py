@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta
 import logging
+import math
 import os
 import signal
 import numpy as np
@@ -31,13 +32,13 @@ class BfStreamTrader(SubscribeCallback):
         self.n_load = 100                                       # mutable
         self.ewm_vd = {'mean': 0, 'var': 1}                     # mutable
         self.ewm_lrr = {'mean': 0, 'var': 1}                    # mutable
-        self.collat = None                                      # mutable
+        self.margin = None                                      # mutable
         self.stat = {}                                          # mutable
         self.volumes = pd.DataFrame()                           # mutable
         self.reserved = {}                                      # mutable
         self.order_datetime = None                              # mutable
         self.last_open = {}                                     # mutable
-        self.anchored_collat = None                             # mutable
+        self.anchor_margin = None                               # mutable
         self.n_size_over = 0                                    # mutable
         self.logger.debug(vars(self))
 
@@ -49,7 +50,7 @@ class BfStreamTrader(SubscribeCallback):
         ).groupby('side')['size'].sum()
         self.ewm_vd = self._compute_ewm_volume_delta()
         try:
-            self.collat = self._fetch_collat()
+            self.margin = self._fetch_margin()
         except Exception as e:
             self.logger.error(e)
         else:
@@ -67,7 +68,7 @@ class BfStreamTrader(SubscribeCallback):
 
     def _print(self, message):
         text = (
-            '| BUY:{0} | SELL:{1} | EWMA:{2:8.3f} | COLLAT:  {3} |\t> {4}'
+            '| BUY:{0} | SELL:{1} | EWMA:{2:8.3f} | MARGIN:  {3} |\t> {4}'
         ).format(
             *[
                 (
@@ -75,22 +76,22 @@ class BfStreamTrader(SubscribeCallback):
                     else ' ' * 8
                 ) for s in ['BUY', 'SELL']
             ],
-            self.ewm_vd['mean'], int(self.collat), message
+            self.ewm_vd['mean'], int(self.margin), message
         )
         if self.quiet:
             self.logger.info(text)
         else:
             print(text, flush=True)
 
-    def _fetch_collat(self):
+    def _fetch_margin(self):
         collateral = self.bF.getcollateral()
         if isinstance(collateral, dict) and 'collateral' in collateral:
             self.logger.debug(collateral)
-            collat = collateral['collateral']
-            self.logger.info('collat: {}'.format(collat))
+            margin = collateral['collateral'] + collateral['open_position_pnl']
+            self.logger.info('margin: {}'.format(margin))
         else:
             raise BfautError(collateral)
-        return collat
+        return margin
 
     def _fetch_states(self):
         pc = {'fx': ('FX_' + self.pair), 'origin': self.pair}
@@ -102,7 +103,7 @@ class BfStreamTrader(SubscribeCallback):
                 s: sum([p['size'] for p in positions if p['side'] == s])
                 for s in ['SELL', 'BUY']
             }
-            pos_size = max(pos_sizes.values())
+            pos_size = round(max(pos_sizes.values()) * 1000) / 1000
             pos_side = (
                 [k for k, v in pos_sizes.items() if v == pos_size][0]
                 if pos_size > 0 else None
@@ -207,7 +208,9 @@ class BfStreamTrader(SubscribeCallback):
             if self.trade['bet'] == 'Martingale':
                 bet_size = (
                     self.trade['size']['unit'] if self.won
-                    else self.last_open['size'] * 2
+                    else self.last_open['size'] * (
+                        self.trade['size'].get('multiplier') or 2
+                    )
                 )
             elif self.trade['bet'] == "d'Alembert":
                 bet_size = (
@@ -232,7 +235,7 @@ class BfStreamTrader(SubscribeCallback):
                 if self.trade['bet'] == 'Pyramid' else
                 self.trade['size']['unit']
             )
-        order_size = round(
+        order_size = math.ceil(
             (
                 min(bet_size, self.trade['size']['max'])
                 if self.open and 'max' in self.trade['size'] else
@@ -259,10 +262,23 @@ class BfStreamTrader(SubscribeCallback):
             self.reserved = self.stat['position']
             self.order_datetime = None
         self.logger.info('self.reserved: {}'.format(self.reserved))
-        if self.anchored_collat:
-            self.won = (self.collat >= self.anchored_collat)
+        if self.anchor_margin:
+            self.logger.info(
+                'pl in round: {}'.format(self.margin - self.anchor_margin)
+            )
+            self.won = (self.margin >= self.anchor_margin)
+            self.logger.info('self.won: {}'.format(self.won))
             if self.won and self.reserved['size'] == 0 and not queue_is_left:
-                self.anchored_collat = None
+                self.anchor_margin = None
+                self.logger.info(
+                    'self.anchor_margin: {}'.format(self.anchor_margin)
+                )
+            else:
+                self.logger.debug(
+                    'self.anchor_margin: {}'.format(self.anchor_margin)
+                )
+        else:
+            self.logger.debug('self.won: {}'.format(self.won))
         self.open = (self.reserved['size'] < self.trade['size']['unit'])
         order_side = self._determine_order_side()
         order_size = self._compute_order_size()
@@ -323,8 +339,15 @@ class BfStreamTrader(SubscribeCallback):
                             'side': order_side,
                             'size': self.reserved['size'] + order_size
                         }
-                        if self.anchored_collat is None:
-                            self.anchored_collat = self.collat
+                        if self.anchor_margin is None:
+                            self.anchor_margin = self.margin
+                            self.logger.info(
+                                'self.anchor_margin: {}'.format(
+                                    self.anchor_margin
+                                )
+                            )
+                        else:
+                            self.logger.debug(self.anchor_margin)
                     else:
                         updated_size = self.reserved['size'] - order_size
                         if abs(updated_size) < 0.001:
