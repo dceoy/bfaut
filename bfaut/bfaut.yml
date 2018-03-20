@@ -3,7 +3,7 @@ bF:
   api_secret: ''
 trade:
   bet: 'Martingale'     # Martingale | d'Alembert
-  mode: 'pivot'         # pivot | positive | negative
+  mode: 'positive'      # pivot | positive | negative
   size:
     unit: 0.01
     max: 1              # optional
