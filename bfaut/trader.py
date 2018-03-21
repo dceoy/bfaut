@@ -2,15 +2,14 @@
 
 from datetime import datetime, timedelta
 import logging
-import math
-import os
+from pprint import pprint
 import signal
 import numpy as np
 import pandas as pd
 from pubnub.callbacks import SubscribeCallback
 import pybitflyer
 from .info import BfAsyncSubscriber
-from .util import BfautError, dump_yaml
+from .util import BfautError
 
 
 class BfStreamTrader(SubscribeCallback):
@@ -21,20 +20,19 @@ class BfStreamTrader(SubscribeCallback):
             api_secret=config['bF']['api_secret']
         )
         self.trade = config['trade']
-        self.mode = (self.trade.get('mode') or 'pivot')
         self.pair = pair
         self.timeout_delta = timedelta(seconds=int(timeout))
         self.quiet = quiet
         self.sfd_pins = np.array([0.05, 0.1, 0.15, 0.2])
-        self.contrary = (self.mode == 'negative')               # mutable
+        self.contrary = self.trade.get('contrary')              # mutable
         self.ticks = {}                                         # mutable
         self.open = None                                        # mutable
         self.won = False                                        # mutable
         self.n_load = 20                                        # mutable
         self.ewm_dv = {'mean': 0, 'var': 1}                     # mutable
         self.bollinger_band = np.array([])                      # mutable
-        self.ewm_pl = {'mean': 0, 'var': 1000}                  # mutable
         self.order_side = None                                  # mutable
+        self.init_margin = None                                 # mutable
         self.margin = None                                      # mutable
         self.position = {}                                      # mutable
         self.sfd_penal_side = None                              # mutable
@@ -42,7 +40,7 @@ class BfStreamTrader(SubscribeCallback):
         self.reserved = {}                                      # mutable
         self.order_datetime = None                              # mutable
         self.last_open = {}                                     # mutable
-        self.retried_side = None                               # mutable
+        self.retried_side = None                                # mutable
         self.n_size_over = 0                                    # mutable
         self.logger.debug(vars(self))
 
@@ -82,22 +80,20 @@ class BfStreamTrader(SubscribeCallback):
                                     self.bollinger_band,
                                     formatter={
                                         'float_kind':
-                                        lambda f: '{:8.4f}'.format(f)
+                                        lambda f: '{:7.3f}'.format(f)
                                     }
                                 )
                             )
                         )
-                elif self.n_load == 1:
-                    try:
-                        self.reserved = self._fetch_position()
-                    except Exception as e:
-                        self.logger.error(e)
-                    else:
-                        self.n_load -= 1
-                else:
+                elif self.init_margin:
                     self.n_load -= 1
                     self._print(
                         'Wait for loading. (left: {})'.format(self.n_load)
+                    )
+                else:
+                    self.init_margin = self.margin
+                    self._print(
+                        'Start loading. (left: {})'.format(self.n_load)
                     )
         elif message.channel.startswith('lightning_ticker_'):
             self.ticks[message.channel] = message.message
@@ -112,7 +108,7 @@ class BfStreamTrader(SubscribeCallback):
     def _print(self, message):
         text = (
             '| BUY:{0} | SELL:{1} | EWM DELTA:{2:8.3f} | MARGIN:  {3} |' +
-            '{4}\t> {5}'
+            ' PL:{4:' + str(len(str(int(self.margin))) + 1) + 'd} |\t> {5}'
         ).format(
             *[
                 (
@@ -121,10 +117,7 @@ class BfStreamTrader(SubscribeCallback):
                 ) for s in ['BUY', 'SELL']
             ],
             self.ewm_dv['mean'], round(self.margin),
-            (
-                ' EWM PL:{:>8d} |'.format(round(self.ewm_pl['mean']))
-                if self.trade.get('mode') == 'pivot' else ''
-            ),
+            round(self.margin - self.init_margin),
             message
         )
         if self.quiet:
@@ -137,12 +130,8 @@ class BfStreamTrader(SubscribeCallback):
             fw_side = 'BUY'
         elif max(self.bollinger_band) < 0:
             fw_side = 'SELL'
-        elif self.reserved.get('side') == 'BUY' and self.ewm_dv['mean'] <= 0:
-            fw_side = 'SELL'
-        elif self.reserved.get('side') == 'SELL' and self.ewm_dv['mean'] > 0:
-            fw_side = 'BUY'
         else:
-            fw_side = None
+            fw_side = self._reverse_side(self.reserved.get('side'))
         order_side = self.retried_side or (
             self._reverse_side(fw_side) if self.contrary else fw_side
         )
@@ -212,27 +201,6 @@ class BfStreamTrader(SubscribeCallback):
         self.logger.info('ewm_dv: {}'.format(ewm_dv))
         return ewm_dv
 
-    def _compute_ewm_pl(self):
-        pl = (
-            (self.margin - self.last_open['margin']) / self.last_open['size']
-            if self.last_open else 0
-        )
-        self.logger.info('pl: {}'.format(pl))
-        ewm_pl = {
-            'mean': (
-                self.trade['ewm_alpha'] * pl +
-                (1 - self.trade['ewm_alpha']) * self.ewm_pl['mean']
-            ),
-            'var': (
-                (1 - self.trade['ewm_alpha']) * (
-                    self.ewm_pl['var'] + self.trade['ewm_alpha'] *
-                    np.square(pl - self.ewm_pl['mean'])
-                )
-            )
-        }
-        self.logger.info('ewm_pl: {}'.format(ewm_pl))
-        return ewm_pl
-
     def _compute_order_size(self):
         if self.open:
             if self.last_open and self.n_size_over == 1:
@@ -254,7 +222,7 @@ class BfStreamTrader(SubscribeCallback):
             else:
                 bet_size = self.trade['size']['unit']
             self.logger.info('bet_size: {}'.format(bet_size))
-            order_size = math.ceil(
+            order_size = round(
                 (
                     min(bet_size, self.trade['size']['max'])
                     if self.open and 'max' in self.trade['size'] else bet_size
@@ -285,7 +253,7 @@ class BfStreamTrader(SubscribeCallback):
         else:
             pass
         self.logger.info('self.won: {}'.format(self.won))
-        self.open = (self.reserved['size'] < self.trade['size']['unit'])
+        self.open = (self.reserved['size'] < 0.001)
         order_size = self._compute_order_size()
 
         if queue_is_left:
@@ -355,27 +323,16 @@ class BfStreamTrader(SubscribeCallback):
                                 'side': self._reverse_side(self.order_side),
                                 'size': abs(updated_size)
                             }
-                        if self.mode == 'pivot':
-                            self.ewm_pl = self._compute_ewm_pl()
-                            if self.ewm_pl['mean'] < 0:
-                                self.contrary = not self.contrary
-                                self.logger.info(
-                                    'self.contrary: {}'.format(self.contrary)
-                                )
-                            else:
-                                pass
-                        else:
-                            pass
                     self.retried_side = None
                     self.n_size_over = 0
                 else:
                     if order.get('status') == - 205:
                         self.n_size_over += 1
-                    elif order.get('status') in [- 1, - 208, - 508]:
+                    elif order.get('status') in [- 1, - 208]:
                         self.retried_side = self.order_side
                     else:
                         pass
-                    self.logger.error(os.linesep + dump_yaml(order))
+                    pprint(order)
 
 
 def open_deal(config, pair, timeout=3600, quiet=False):

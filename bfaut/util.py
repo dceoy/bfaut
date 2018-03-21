@@ -16,10 +16,6 @@ def read_yaml(path):
     return d
 
 
-def dump_yaml(dict, flow=False):
-    return yaml.dump(dict, default_flow_style=flow)
-
-
 def set_config_yml(path=None, env='BFAUT_YML', default='bfaut.yml'):
     return os.path.expanduser(
         tuple(filter(

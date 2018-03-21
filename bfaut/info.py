@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from pprint import pprint
 import signal
 import sqlite3
 import pandas as pd
@@ -8,7 +9,6 @@ from pubnub.pnconfiguration import PNConfiguration, PNReconnectionPolicy
 from pubnub.pubnub_tornado import PubNubTornado
 import pybitflyer
 from tornado import gen
-from .util import dump_yaml
 
 
 class BfAsyncSubscriber:
@@ -88,4 +88,4 @@ def print_states(config, pair, items):
         'positions':
         'positions' in keys and bF.getpositions(product_code=fx_pair)
     }
-    print(dump_yaml({k: v for k, v in d.items() if v}))
+    pprint({k: v for k, v in d.items() if v})
