@@ -2,11 +2,12 @@ bF:
   api_key: ''
   api_secret: ''
 trade:
-  bet: 'Martingale'     # Martingale | d'Alembert
-  contrary: false       # optional
+  bet: "Oscar's grind"  # { Martingale, d'Alembert, Pyramid, Oscar's grind } (optional)
+  contrary: false       # true or false     (optional)
   size:
-    unit: 0.001
-    max: 1              # optional
-    multiplier: 2       # optional
-  ewm_alpha: 0.1
-  sigma_trigger: 1
+    unit: 0.001         # [0.001, 1000]     (optional for `Martingale`)
+    init: 0.01          # [0.001, 1000]     (optional)
+    min: 0.001          # [0.001, 1000]     (optional)
+    max: 1              # [0.001, 1000]     (optional)
+  ewm_alpha: 0.05       # (0, 1)
+  sigma_trigger: 1      # [0, 10]           (optional)

@@ -24,7 +24,8 @@ class BfStreamTrader(SubscribeCallback):
         self.timeout_delta = timedelta(seconds=int(timeout))
         self.quiet = quiet
         self.sfd_pins = np.array([0.05, 0.1, 0.15, 0.2])
-        self.contrary = self.trade.get('contrary')              # mutable
+        self.betting_system = self.trade.get('bet')
+        self.contrary = self.trade.get('contrary')
         self.ticks = {}                                         # mutable
         self.open = None                                        # mutable
         self.won = False                                        # mutable
@@ -41,6 +42,7 @@ class BfStreamTrader(SubscribeCallback):
         self.order_datetime = None                              # mutable
         self.last_open = {}                                     # mutable
         self.retried_side = None                                # mutable
+        self.anchor_margin = 0                                  # mutable
         self.n_size_over = 0                                    # mutable
         self.logger.debug(vars(self))
 
@@ -203,31 +205,59 @@ class BfStreamTrader(SubscribeCallback):
 
     def _compute_order_size(self):
         if self.open:
+            init_size = (
+                self.trade['size'].get('init') or
+                self.trade['size'].get('unit') or 0.001
+            )
+            self.logger.info('init_size: {}'.format(init_size))
             if self.last_open and self.n_size_over == 1:
                 bet_size = self.last_open['size']
             elif self.last_open and self.n_size_over == 0:
-                betting_system = self.trade.get('bet')
-                if not self.won and betting_system == 'Martingale':
-                    bet_size = self.last_open['size'] * (
-                        self.trade['size'].get('multiplier') or 2
-                    )
-                elif not self.won and betting_system == "d'Alembert":
-                    bet_size = self.last_open['size'] + (
-                        self.trade['size']['unit'] * (
-                            self.trade['size'].get('multiplier') or 1
+                if self.betting_system == 'Martingale':
+                    if self.won:
+                        bet_size = init_size
+                    else:
+                        bet_size = self.last_open['size'] * 2
+                elif self.betting_system == "d'Alembert":
+                    if self.won:
+                        bet_size = init_size
+                    else:
+                        bet_size = (
+                            self.last_open['size'] + self.trade['size']['unit']
                         )
-                    )
+                elif self.betting_system == 'Pyramid':
+                    if self.won:
+                        bet_size = (
+                            self.last_open['size'] - self.trade['size']['unit']
+                        )
+                    else:
+                        bet_size = (
+                            self.last_open['size'] + self.trade['size']['unit']
+                        )
+                elif self.betting_system == "Oscar's Grind":
+                    if self.margin >= self.anchor_margin:
+                        bet_size = init_size
+                    elif self.won:
+                        bet_size = (
+                            self.last_open['size'] + self.trade['size']['unit']
+                        )
+                    else:
+                        bet_size = self.last_open['size']
                 else:
-                    bet_size = self.trade['size']['unit']
+                    bet_size = init_size
             else:
-                bet_size = self.trade['size']['unit']
+                bet_size = init_size
             self.logger.info('bet_size: {}'.format(bet_size))
-            order_size = round(
-                (
-                    min(bet_size, self.trade['size']['max'])
-                    if self.open and 'max' in self.trade['size'] else bet_size
-                ) * 1000
-            ) / 1000
+            size_range = sorted([
+                (self.trade['size'].get('min') or bet_size),
+                (self.trade['size'].get('max') or bet_size)
+            ])
+            if bet_size < size_range[0]:
+                order_size = size_range[0]
+            elif bet_size > size_range[1]:
+                order_size = size_range[1]
+            else:
+                order_size = round(bet_size * 1000) / 1000
         else:
             order_size = self.reserved['size']
         self.logger.info('order_size: {}'.format(order_size))
@@ -253,6 +283,19 @@ class BfStreamTrader(SubscribeCallback):
         else:
             pass
         self.logger.info('self.won: {}'.format(self.won))
+        if self.betting_system == "Oscar's Grind" and self.anchor_margin:
+            anchor_pl = self.margin - self.anchor_margin
+            self.logger.info('pl in round: {}'.format(anchor_pl))
+            no_position = (self.reserved['size'] == 0 and not queue_is_left)
+            if anchor_pl >= 0 and no_position:
+                self.anchor_margin = 0
+            else:
+                pass
+            self.logger.info(
+                'self.anchor_margin: {}'.format(self.anchor_margin)
+            )
+        else:
+            pass
         self.open = (self.reserved['size'] < 0.001)
         order_size = self._compute_order_size()
 
@@ -308,6 +351,18 @@ class BfStreamTrader(SubscribeCallback):
                             'side': self.order_side,
                             'size': self.reserved['size'] + order_size
                         }
+                        if self.betting_system == "Oscar's Grind":
+                            if self.anchor_margin:
+                                self.logger.debug(self.anchor_margin)
+                            else:
+                                self.anchor_margin = self.margin
+                                self.logger.info(
+                                    'self.anchor_margin: {}'.format(
+                                        self.anchor_margin
+                                    )
+                                )
+                        else:
+                            pass
                     else:
                         updated_size = self.reserved['size'] - order_size
                         if abs(updated_size) < 0.001:
