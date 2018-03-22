@@ -14,7 +14,7 @@ Usage:
 Options:
     -h, --help          Print help and exit
     -v, --version       Print version and exit
-    --debug             Execute a command with debug messages
+    --debug, --info     Execute a command with debug|info messages
     --sqlite=<path>     Save data in an SQLite3 database
     --file=<yaml>       Set a path to a YAML for configurations [$BFAUT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]

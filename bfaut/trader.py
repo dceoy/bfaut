@@ -25,6 +25,7 @@ class BfStreamTrader(SubscribeCallback):
         self.quiet = quiet
         self.sfd_pins = np.array([0.05, 0.1, 0.15, 0.2])
         self.betting_system = self.trade.get('bet')
+        self.flash = self.trade.get('flash')
         self.contrary = self.trade.get('contrary')
         self.ticks = {}                                         # mutable
         self.open = None                                        # mutable
@@ -92,7 +93,9 @@ class BfStreamTrader(SubscribeCallback):
                         self.logger.error(e)
                     else:
                         self.n_load = 0
-                        self._print('Complete loading.')
+                        self._print(
+                            'Complete loading. (left: {})'.format(self.n_load)
+                        )
                 elif self.init_margin:
                     self.n_load -= 1
                     self._print(
@@ -134,23 +137,27 @@ class BfStreamTrader(SubscribeCallback):
             print(text, flush=True)
 
     def _determine_order_side(self):
-        if self.bollinger_band.size > 2:
+        if self.flash and self.reserved.get('side'):
+            order_side = (
+                self._reverse_side(self.reserved.get('side')) if (
+                    self.volumes[self.reserved['side']] >
+                    self.volumes[self._reverse_side(self.reserved['side'])]
+                ) else None
+            )
+        elif self.bollinger_band.size > 2:
             if self.bollinger_band[0] < 0 and self.bollinger_band[1] > 0:
-                fw_side = 'BUY'
+                order_side = ('SELL' if self.contrary else 'BUY')
             elif self.bollinger_band[- 1] > 0 and self.bollinger_band[- 2] < 0:
-                fw_side = 'SELL'
+                order_side = ('BUY' if self.contrary else 'SELL')
             else:
-                fw_side = self._reverse_side(self.reserved.get('side'))
+                order_side = self._reverse_side(self.reserved.get('side'))
         else:
             if self.bollinger_band[0] > 0:
-                fw_side = 'BUY'
+                order_side = ('SELL' if self.contrary else 'BUY')
             elif self.bollinger_band[- 1] < 0:
-                fw_side = 'SELL'
+                order_side = ('BUY' if self.contrary else 'SELL')
             else:
-                fw_side = self._reverse_side(self.reserved.get('side'))
-        order_side = self.retried_side or (
-            self._reverse_side(fw_side) if self.contrary else fw_side
-        )
+                order_side = self._reverse_side(self.reserved.get('side'))
         self.logger.info('order_side: {}'.format(order_side))
         return order_side
 
@@ -185,8 +192,7 @@ class BfStreamTrader(SubscribeCallback):
 
     def _fetch_sfd_penal_side(self):
         mp = {
-            k.replace('lightning_ticker_', ''):
-            (v['best_bid'] + v['best_ask']) / 2
+            k.replace('lightning_ticker_', ''): v['ltp']
             for k, v in self.ticks.items()
         }
         self.logger.info('mp: {}'.format(mp))
@@ -257,7 +263,7 @@ class BfStreamTrader(SubscribeCallback):
                         bet_size = (
                             self.last_open['size'] + self.trade['size']['unit']
                         )
-                elif self.betting_system == "Oscar's Grind":
+                elif self.betting_system == "Oscar's grind":
                     if self.margin >= self.anchor_margin:
                         bet_size = init_size
                     elif self.won:
@@ -306,7 +312,7 @@ class BfStreamTrader(SubscribeCallback):
         else:
             pass
         self.logger.info('self.won: {}'.format(self.won))
-        if self.betting_system == "Oscar's Grind" and self.anchor_margin:
+        if self.betting_system == "Oscar's grind" and self.anchor_margin:
             anchor_pl = self.margin - self.anchor_margin
             self.logger.info('pl in round: {}'.format(anchor_pl))
             no_position = (self.reserved['size'] == 0 and not queue_is_left)
@@ -374,7 +380,7 @@ class BfStreamTrader(SubscribeCallback):
                             'side': self.order_side,
                             'size': self.reserved['size'] + order_size
                         }
-                        if self.betting_system == "Oscar's Grind":
+                        if self.betting_system == "Oscar's grind":
                             if self.anchor_margin:
                                 self.logger.debug(self.anchor_margin)
                             else:
