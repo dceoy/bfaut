@@ -31,7 +31,7 @@ class BfStreamTrader(SubscribeCallback):
         self.won = False                                        # mutable
         self.n_load = 20                                        # mutable
         self.ewm_dv = {'mean': 0, 'var': 1}                     # mutable
-        self.bollinger_band = np.array([])                      # mutable
+        self.bollinger = []                                     # mutable
         self.order_side = None                                  # mutable
         self.init_margin = None                                 # mutable
         self.margin = None                                      # mutable
@@ -53,12 +53,8 @@ class BfStreamTrader(SubscribeCallback):
             )[['side', 'size']].append(
                 pd.DataFrame({'side': ['BUY', 'SELL'], 'size': [0, 0]})
             ).groupby('side')['size'].sum()
-            self.ewm_dv = self._compute_ewm_delta_volume()
-            self.bollinger_band = (
-                self.ewm_dv['mean'] + np.array([- 1, 1]) *
-                np.sqrt(self.ewm_dv['var']) *
-                (self.trade.get('sigma_trigger') or 0)
-            )
+            self.ewm_dv = self._calculate_ewm_delta_volume()
+            self.bollinger_band = self._calculate_bollinger_bands()
             try:
                 self.margin = self._fetch_margin()
             except Exception as e:
@@ -77,16 +73,26 @@ class BfStreamTrader(SubscribeCallback):
                             self._trade()
                     else:
                         self._print(
-                            'Skip by delta volume. (band: {})'.format(
-                                np.array2string(
-                                    self.bollinger_band,
-                                    formatter={
-                                        'float_kind':
-                                        lambda f: '{:7.3f}'.format(f)
-                                    }
-                                )
+                            'Skip by delta volume.{}'.format(
+                                ' (bb: {})'.format(
+                                    np.array2string(
+                                        self.bollinger_band,
+                                        formatter={
+                                            'float_kind':
+                                            lambda f: '{:5.1f}'.format(f)
+                                        }
+                                    )
+                                ) if self.trade.get('bollinger') else ''
                             )
                         )
+                elif self.n_load == 1:
+                    try:
+                        self.reserved = self._fetch_position()
+                    except Exception as e:
+                        self.logger.error(e)
+                    else:
+                        self.n_load = 0
+                        self._print('Complete loading.')
                 elif self.init_margin:
                     self.n_load -= 1
                     self._print(
@@ -128,12 +134,20 @@ class BfStreamTrader(SubscribeCallback):
             print(text, flush=True)
 
     def _determine_order_side(self):
-        if min(self.bollinger_band) > 0:
-            fw_side = 'BUY'
-        elif max(self.bollinger_band) < 0:
-            fw_side = 'SELL'
+        if self.bollinger_band.size > 2:
+            if self.bollinger_band[0] < 0 and self.bollinger_band[1] > 0:
+                fw_side = 'BUY'
+            elif self.bollinger_band[- 1] > 0 and self.bollinger_band[- 2] < 0:
+                fw_side = 'SELL'
+            else:
+                fw_side = self._reverse_side(self.reserved.get('side'))
         else:
-            fw_side = self._reverse_side(self.reserved.get('side'))
+            if self.bollinger_band[0] > 0:
+                fw_side = 'BUY'
+            elif self.bollinger_band[- 1] < 0:
+                fw_side = 'SELL'
+            else:
+                fw_side = self._reverse_side(self.reserved.get('side'))
         order_side = self.retried_side or (
             self._reverse_side(fw_side) if self.contrary else fw_side
         )
@@ -185,7 +199,7 @@ class BfStreamTrader(SubscribeCallback):
         self.logger.info('sfd_penal_side: {}'.format(sfd_penal_side))
         return sfd_penal_side
 
-    def _compute_ewm_delta_volume(self):
+    def _calculate_ewm_delta_volume(self):
         delta_volume = self.volumes['BUY'] - self.volumes['SELL']
         self.logger.info('delta_volume: {}'.format(delta_volume))
         ewm_dv = {
@@ -203,7 +217,16 @@ class BfStreamTrader(SubscribeCallback):
         self.logger.info('ewm_dv: {}'.format(ewm_dv))
         return ewm_dv
 
-    def _compute_order_size(self):
+    def _calculate_bollinger_bands(self):
+        b = (self.trade.get('bollinger') or [0])
+        multipliers = (b if b and isinstance(b, list) else [b])
+        return np.sort(np.concatenate([
+            self.ewm_dv['mean'] + np.array([- m, m]) *
+            np.sqrt(self.ewm_dv['var'])
+            for m in multipliers
+        ]))
+
+    def _calculate_order_size(self):
         if self.open:
             init_size = (
                 self.trade['size'].get('init') or
@@ -297,7 +320,7 @@ class BfStreamTrader(SubscribeCallback):
         else:
             pass
         self.open = (self.reserved['size'] < 0.001)
-        order_size = self._compute_order_size()
+        order_size = self._calculate_order_size()
 
         if queue_is_left:
             self._print(
