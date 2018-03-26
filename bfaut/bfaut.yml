@@ -5,6 +5,7 @@ trade:
   bet: "Oscar's grind"  # { Martingale, d'Alembert, Pyramid, Oscar's grind } (optional)
   contrary: false       # true or false     (optional)
   flash: false          # true or false     (optional)
+  retry: false          # true or false     (optional)
   size:
     unit: 0.001         # [0.001, 1000]     (optional for `Martingale`)
     init: 0.01          # [0.001, 1000]     (optional)

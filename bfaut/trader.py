@@ -25,8 +25,9 @@ class BfStreamTrader(SubscribeCallback):
         self.quiet = quiet
         self.sfd_pins = np.array([0.05, 0.1, 0.15, 0.2])
         self.betting_system = self.trade.get('bet')
-        self.flash = self.trade.get('flash')
         self.contrary = self.trade.get('contrary')
+        self.flash = self.trade.get('flash')
+        self.retry = self.trade.get('retry')
         self.ticks = {}                                         # mutable
         self.open = None                                        # mutable
         self.won = False                                        # mutable
@@ -138,12 +139,9 @@ class BfStreamTrader(SubscribeCallback):
 
     def _determine_order_side(self):
         if self.flash and self.reserved.get('side'):
-            order_side = (
-                self._reverse_side(self.reserved.get('side')) if (
-                    self.volumes[self.reserved['side']] >
-                    self.volumes[self._reverse_side(self.reserved['side'])]
-                ) else None
-            )
+            order_side = self._reverse_side(self.reserved['side'])
+        elif self.retry and self.retried_side:
+            order_side = self.retried_side
         elif self.bollinger_band.size > 2:
             if self.bollinger_band[0] < 0 and self.bollinger_band[1] > 0:
                 order_side = ('SELL' if self.contrary else 'BUY')
@@ -351,7 +349,7 @@ class BfStreamTrader(SubscribeCallback):
                     child_order_type='MARKET',
                     side=self.order_side,
                     size=order_size,
-                    time_in_force='GTC'
+                    time_in_force=('FOK' if self.open else 'GTC')
                 )
             except Exception as e:
                 self.logger.error(e)
@@ -412,7 +410,7 @@ class BfStreamTrader(SubscribeCallback):
                 else:
                     if order.get('status') == - 205:
                         self.n_size_over += 1
-                    elif order.get('status') in [- 1, - 208]:
+                    elif self.retry and order.get('status') in [- 1, - 208]:
                         self.retried_side = self.order_side
                     else:
                         pass
