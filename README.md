@@ -23,7 +23,7 @@ Usage:
     bfaut stream [--debug] [--sqlite=<path>] [--quiet] [<channel>...]
     bfaut init [--debug] [--file=<yaml>]
     bfaut state [--debug] [--file=<yaml>] [--pair=<code>] [<item>...]
-    bfaut auto [--debug|--info] [--file=<yaml>] [--pair=<code>] [--contrary]
+    bfaut auto [--debug|--info] [--file=<yaml>] [--pair=<code>]
                [--timeout=<sec>] [--quiet]
     bfaut -h|--help
     bfaut -v|--version
@@ -31,11 +31,10 @@ Usage:
 Options:
     -h, --help          Print help and exit
     -v, --version       Print version and exit
-    --debug             Execute a command with debug messages
+    --debug, --info     Execute a command with debug|info messages
     --sqlite=<path>     Save data in an SQLite3 database
     --file=<yaml>       Set a path to a YAML for configurations [$BFAUT_YML]
     --pair=<code>       Set an actual currency pair [default: BTC_JPY]
-    --contrary          Trade with contrary mode
     --timeout=<sec>     Set senconds for timeout [default: 3600]
     --quiet             Suppress messages
 
