@@ -13,6 +13,6 @@ RUN set -e \
 
 RUN set -e \
       && pip install -U --no-cache-dir pip /tmp/bfaut \
-      && rm -rf /tmp/*
+      && rm -rf /tmp/bfaut
 
 ENTRYPOINT ["bfaut"]
